@@ -202,89 +202,86 @@ df = load_data()
 tab1, tab2, tab5, tab3, tab4 = st.tabs(["📝 Daily Log", "📚 Bulk Backfill", "🐙 Git Import", "🤖 Excel Automator", "📊 History"])
 
 import subprocess
+import requests
 import google.generativeai as genai
 
-# --- TAB 5: GIT IMPORT ---
+# --- TAB 5: GITHUB IMPORT ---
 with tab5:
-    st.header("🐙 Git History Importer")
-    st.info("Scan your local git repositories to auto-generate logs from your commit history.")
+    st.header("☁️ GitHub History Importer")
+    st.info("Fetch commit history directly from GitHub.com to generate logs. No local .git folder needed!")
 
     # 1. Config
     with st.expander("⚙️ Configuration", expanded=True):
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            default_author = "sithikaru@gmail.com"
-            author_email = st.text_input("Git Author Email", value=default_author)
+            gh_username = st.text_input("GitHub Username", value="zijja")
+            gh_token = st.text_input("GitHub Token (Required for Private Repos)", type="password", help="Generate a Fine-grained Token or PAT from GitHub settings.")
         with col_g2:
-            default_scan_dir = os.path.dirname(os.getcwd())
-            scan_dir = st.text_input("Directory to Scan for Repos", value=default_scan_dir)
-        
-        gemini_api_key = st.text_input("Gemini API Key (Optional, for creative summaries)", type="password")
+            gemini_api_key = st.text_input("Gemini API Key (Optional)", type="password")
 
-    # 2. Scan Logic
-    if "git_repos" not in st.session_state:
-        st.session_state.git_repos = []
-
-    if st.button("🔍 Scan for Repositories"):
-        found_repos = []
-        try:
-            subdirs = [os.path.join(scan_dir, d) for d in os.listdir(scan_dir) if os.path.isdir(os.path.join(scan_dir, d))]
-            for d in subdirs:
-                if os.path.exists(os.path.join(d, ".git")):
-                    found_repos.append(d)
-            st.session_state.git_repos = found_repos
-            if found_repos:
-                st.success(f"Found {len(found_repos)} git repositories!")
-            else:
-                st.warning("No git repositories found in this directory.")
-        except Exception as e:
-            st.error(f"Error scanning directory: {e}")
+    # 2. Repo Input
+    st.subheader("Select Repositories")
+    default_repos = "sithija/viral-networks-fe-main\nsithija/yeheli-web-strapi-main" 
+    repo_input = st.text_area("List Repositories (owner/repo_name)", value=default_repos, height=100, help="One per line. Example: openai/streamlit")
+    
+    selected_repos = [r.strip() for r in repo_input.split('\n') if r.strip()]
 
     # 3. Import Logic
-    if st.session_state.git_repos:
-        selected_repos = st.multiselect("Select Repositories to Import From", st.session_state.git_repos, default=st.session_state.git_repos)
-        
-        c_d1, c_d2 = st.columns(2)
-        with c_d1:
-            start_date = st.date_input("Start Date", datetime.today() - timedelta(days=30))
-        with c_d2:
-            end_date = st.date_input("End Date", datetime.today())
+    c_d1, c_d2 = st.columns(2)
+    with c_d1:
+        start_date = st.date_input("Start Date", datetime.today() - timedelta(days=30))
+    with c_d2:
+        end_date = st.date_input("End Date", datetime.today())
 
-        if st.button("🚀 Generate Logs from History"):
+    if st.button("🚀 Fetch & Generate Logs"):
+        if not selected_repos:
+            st.error("Please enter at least one repository.")
+        else:
             all_commits = []
+            scan_progress = st.progress(0, text="Fetching from GitHub...")
             
-            # Progress bar for scanning repos
-            scan_progress = st.progress(0, text="Scanning repositories...")
+            headers = {"Accept": "application/vnd.github.v3+json"}
+            if gh_token:
+                headers["Authorization"] = f"token {gh_token}"
             
             for i, repo in enumerate(selected_repos):
-                repo_name = os.path.basename(repo)
                 try:
-                    cmd = [
-                        "git", "-C", repo, "log",
-                        f"--author={author_email}",
-                        f"--since={start_date.strftime('%Y-%m-%d')}",
-                        f"--until={end_date.strftime('%Y-%m-%d')} 23:59:59",
-                        "--pretty=format:%ad|%s",
-                        "--date=short"
-                    ]
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    if result.returncode == 0 and result.stdout:
-                        lines = result.stdout.strip().split('\n')
-                        for line in lines:
-                            if "|" in line:
-                                parts = line.split("|", 1)
-                                if len(parts) == 2:
-                                    date_str, msg = parts
-                                    all_commits.append({
-                                        "date": date_str,
-                                        "message": msg,
-                                        "repo": repo_name
-                                    })
+                    # Fetch commits
+                    url = f"https://api.github.com/repos/{repo}/commits"
+                    params = {
+                        "author": gh_username,
+                        "since": start_date.strftime('%Y-%m-%dT00:00:00Z'),
+                        "until": (end_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00Z'), # Include end date fully
+                        "per_page": 100
+                    }
+                    
+                    resp = requests.get(url, headers=headers, params=params)
+                    
+                    if resp.status_code == 200:
+                        commits = resp.json()
+                        st.toast(f"Fetched {len(commits)} commits from {repo}!")
+                        for c in commits:
+                            commit_date_str = c["commit"]["author"]["date"]
+                            # Convert ISO to YYYY-MM-DD
+                            dt_obj = datetime.strptime(commit_date_str, "%Y-%m-%dT%H:%M:%SZ")
+                            date_only = dt_obj.strftime("%Y-%m-%d")
+                            msg = c["commit"]["message"]
+                            
+                            all_commits.append({
+                                "date": date_only,
+                                "message": msg,
+                                "repo": repo
+                            })
+                    else:
+                        st.error(f"Failed to fetch {repo}: {resp.status_code} - {resp.text}")
+                        
                 except Exception as e:
-                    st.error(f"Error reading {repo_name}: {e}")
+                    st.error(f"Error fetching {repo}: {e}")
+                
                 scan_progress.progress((i + 1) / len(selected_repos))
             
             if all_commits:
+                # Group by Date
                 commits_by_date = {}
                 for c in all_commits:
                     d = c["date"]
@@ -295,73 +292,66 @@ with tab5:
                 generated_logs = []
                 total_days = len(commits_by_date)
                 
-                # Progress bar for generating summaries
-                gen_progress = st.progress(0, text="Generating creative logs...")
+                gen_progress = st.progress(0, text="Summarizing with Gemini..." if gemini_api_key else "Summarizing...")
                 
-                # Configure Gemini if key provided
+                # Configure Gemini
                 model = None
                 if gemini_api_key:
                     try:
                         genai.configure(api_key=gemini_api_key)
                         model = genai.GenerativeModel('gemini-pro')
                     except Exception as e:
-                        st.error(f"Failed to configure Gemini: {e}")
+                        st.error(f"Gemini Config Error: {e}")
 
                 for idx, (d_str, commits) in enumerate(commits_by_date.items()):
                     repos_touched = list(set([c["repo"] for c in commits]))
-                    msgs = [c["message"] for c in commits]
-                    repo_text = ", ".join(repos_touched)
+                    msgs = [c["message"] for c in commits] # Use ALL messages for context
+                    
+                    repo_text = ", ".join([r.split('/')[-1] for r in repos_touched]) # Just repo name
                     
                     description = ""
                     prob = ""
                     sol = ""
                     
                     if model:
-                        # Use Gemini
                         prompt = f"""
-                        Task: Write a single, professional daily log entry (1-2 sentences) in first–person past tense based on these git commit messages found in repositories: {repo_text}.
-                        Also extract any technical problems encountered and solutions applied if clear from the messages.
-                        
-                        Commit Messages:
+                        Role: Professional developer writing a daily work log.
+                        Context: Worked on {repo_text}.
+                        Input Commits:
                         {chr(10).join(msgs)}
                         
-                        Output format (JSON):
+                        Task:
+                        1. Summarize the work done into 1-2 professional sentences (first-person past tense). 
+                        2. Identify ONE key technical challenge/bug if present.
+                        3. Identify the solution used.
+                        
+                        Output JSON:
                         {{
                             "description": "...",
                             "problem": "...",
                             "solution": "..."
                         }}
-                        If no problem/solution is clear, leave them empty strings.
                         """
                         try:
                             response = model.generate_content(prompt)
-                            # Simple parsing (assuming clean JSON or extracting text)
-                            # Fallback to text parsing if JSON fails
                             import json
                             text = response.text
-                            # Try to find JSON block
                             start = text.find('{')
                             end = text.rfind('}') + 1
                             if start != -1 and end != -1:
-                                json_str = text[start:end]
-                                data = json.loads(json_str)
+                                data = json.loads(text[start:end])
                                 description = data.get("description", "")
                                 prob = data.get("problem", "")
                                 sol = data.get("solution", "")
                             else:
-                                description = text # Fallback
-                        except Exception as e:
-                            description = f"Worked on {repo_text}. {'. '.join(msgs[:3])}."
+                                description = text
+                        except:
+                            description = f"Contributed to {repo_text}. Updates include: {msgs[0]}."
                     
-                    # Fallback logic if no model or model failed
                     if not description:
-                        description = f"Worked on {repo_text} repository. " + ". ".join(msgs[:5]) + "."
-                        for m in msgs:
-                            m_lower = m.lower()
-                            if any(k in m_lower for k in ["error", "bug", "fail", "fix"]):
-                                prob = "Encountered technical issues."
-                                sol = f"Resolved: {m}"
-                                break
+                        description = f"Development work on {repo_text}. Key changes: {msgs[0]}."
+                        if len(msgs) > 1:
+                            description += f" Also worked on {msgs[1]}."
 
                     generated_logs.append({
                         "Date": d_str,
@@ -370,16 +360,16 @@ with tab5:
                         "Problems": prob,
                         "Solutions": sol
                     })
-                    
                     gen_progress.progress((idx + 1) / total_days)
 
                 generated_logs.sort(key=lambda x: x["Date"])
                 st.session_state.generated_git_logs = pd.DataFrame(generated_logs)
-                st.success(f"Generated {len(generated_logs)} entries!")
+                st.success(f"✅ Generated {len(generated_logs)} entries via GitHub API!")
+                
             else:
-                st.warning("No commits found.")
+                st.warning("No commits found matching that criteria.")
 
-    # 4. Preview & Save
+    # 4. Preview & Save (Same as before)
     if "generated_git_logs" in st.session_state and not st.session_state.generated_git_logs.empty:
         st.subheader("Preview Generated Logs")
         edited_logs = st.data_editor(st.session_state.generated_git_logs, num_rows="dynamic")
