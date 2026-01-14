@@ -6,6 +6,7 @@ import openpyxl
 from openpyxl.styles import Alignment
 from io import BytesIO
 import time
+from groq import Groq
 
 # --- CONFIGURATION & DATA ---
 FILE_NAME = "my_placement_logs.csv"
@@ -192,7 +193,7 @@ def fill_excel_sheet(template_file, data_df, output_path=None):
 # --- GUI LAYOUT ---
 st.set_page_config(page_title="Placement Log Automator", page_icon="🚀", layout="wide")
 
-st.title("🚀 Industrial Placement Automator")
+st.title("🚀 Industrial Placement Log Book Automator")
 st.markdown("### Log daily. Generate Excel weekly.")
 
 # Data Loading
@@ -203,7 +204,7 @@ tab1, tab2, tab5, tab3, tab4 = st.tabs(["📝 Daily Log", "📚 Bulk Backfill", 
 
 import subprocess
 import requests
-import google.generativeai as genai
+import json
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -217,12 +218,14 @@ with tab5:
     # Load Config from Env
     gh_username = os.getenv("GITHUB_USERNAME", "")
     gh_token = os.getenv("GITHUB_TOKEN", "")
-    gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+    groq_api_key = os.getenv("GROQ_API_KEY", "")
 
     if not gh_token:
         st.warning("⚠️ `GITHUB_TOKEN` is missing in `.env` file.")
     if not gh_username:
         st.warning("⚠️ `GITHUB_USERNAME` is missing in `.env` file.")
+    if not groq_api_key:
+        st.info("💡 `GROQ_API_KEY` is missing. AI summarization will be skipped. Get one free at https://console.groq.com/")
 
     # 2. Repo Selection
     st.subheader("Select Repositories")
@@ -350,44 +353,60 @@ with tab5:
                     status_text.text(f"Fetching {repo} [{branch_label}]...")
                     
                     try:
-                        url = f"https://api.github.com/repos/{repo}/commits"
-                        params = {
-                            "since": start_date.strftime('%Y-%m-%dT00:00:00Z'),
-                            "until": (end_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00Z'),
-                            "per_page": 100
-                        }
-                        if gh_username:
-                            params["author"] = gh_username
-                        if branch_name:
-                            params["sha"] = branch_name
-                        
-                        resp = requests.get(url, headers=headers, params=params)
-                        
-                        if resp.status_code == 200:
-                            commits = resp.json()
-                            new_count = 0
-                            for c in commits:
-                                sha = c["sha"]
-                                if sha in seen_shas:
-                                    continue # Skip duplicate
-                                seen_shas.add(sha)
-                                new_count += 1
+                        # Pagination Loop
+                        page = 1
+                        while True:
+                            url = f"https://api.github.com/repos/{repo}/commits"
+                            params = {
+                                "since": start_date.strftime('%Y-%m-%dT00:00:00Z'),
+                                "until": (end_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00Z'),
+                                "per_page": 100,
+                                "page": page
+                            }
+                            # Apply Author Filter IF checkbox is checked
+                            if gh_username and use_author_filter:
+                                params["author"] = gh_username
                                 
-                                commit_date_str = c["commit"]["author"]["date"]
-                                dt_obj = datetime.strptime(commit_date_str, "%Y-%m-%dT%H:%M:%SZ")
-                                date_only = dt_obj.strftime("%Y-%m-%d")
-                                msg = c["commit"]["message"]
+                            if branch_name:
+                                params["sha"] = branch_name
+                            
+                            resp = requests.get(url, headers=headers, params=params)
+                            
+                            if resp.status_code == 200:
+                                commits = resp.json()
+                                if not commits:
+                                    break # No more commits
                                 
-                                all_commits.append({
-                                    "date": date_only,
-                                    "message": msg,
-                                    "repo": repo
-                                })
-                            # st.toast(f"Found {new_count} new commits in {repo}/{branch_label}")
-                        elif resp.status_code == 409:
-                            pass # Empty repo
-                        else:
-                            st.warning(f"Failed {repo}/{branch_label}: {resp.status_code}")
+                                for c in commits:
+                                    sha = c["sha"]
+                                    if sha in seen_shas:
+                                        continue # Skip duplicate
+                                    seen_shas.add(sha)
+                                    
+                                    commit_date_str = c["commit"]["author"]["date"]
+                                    dt_obj = datetime.strptime(commit_date_str, "%Y-%m-%dT%H:%M:%SZ")
+                                    date_only = dt_obj.strftime("%Y-%m-%d")
+                                    msg = c["commit"]["message"]
+                                    
+                                    all_commits.append({
+                                        "date": date_only,
+                                        "message": msg,
+                                        "repo": repo
+                                    })
+                                
+                                # Optimization: If fewer than 100 results, we reached end
+                                if len(commits) < 100:
+                                    break
+                                page += 1
+                                # Limit pages to prevent infinite loops on massive repos
+                                if page > 20: 
+                                    break
+                                    
+                            elif resp.status_code == 409:
+                                break # Empty repo
+                            else:
+                                st.warning(f"Failed {repo}/{branch_label}: {resp.status_code}")
+                                break
                             
                     except Exception as e:
                         st.error(f"Error fetching {repo}: {e}")
@@ -410,45 +429,15 @@ with tab5:
                 generated_logs = []
                 total_days = len(commits_by_date)
                 
-                gen_progress = st.progress(0, text="Summarizing with Gemini..." if gemini_api_key else "Summarizing...")
+                gen_progress = st.progress(0, text="Summarizing with AI..." if groq_api_key else "Summarizing...")
                 
-                # Configure Gemini with Auto-Fallback
-                model = None
-                if gemini_api_key:
+                # Initialize Groq Client
+                groq_client = None
+                if groq_api_key:
                     try:
-                        genai.configure(api_key=gemini_api_key)
-                        
-                        # 1. Try preferred model
-                        preferred_model = 'gemini-1.5-flash'
-                        try:
-                            # Test access by finding it in list (avoids token cost of generation check)
-                            supported_models = []
-                            for m in genai.list_models():
-                                if 'generateContent' in m.supported_generation_methods:
-                                    supported_models.append(m.name)
-                            
-                            # Check if preference exists in the list (fuzzy match)
-                            target_model = next((m for m in supported_models if preferred_model in m), None)
-                            
-                            if target_model:
-                                 # Use the exact name from the list (e.g. models/gemini-1.5-flash-001)
-                                 model = genai.GenerativeModel(target_model)
-                                 # st.toast(f"Logged in with {target_model}")
-                            elif supported_models:
-                                # Fallback to first available
-                                fallback = supported_models[0]
-                                st.warning(f"Preferred '{preferred_model}' not found. Falling back to '{fallback}'.")
-                                model = genai.GenerativeModel(fallback)
-                            else:
-                                st.error("No text generation models found for this API key.")
-                                model = None
-                                
-                        except Exception as inner_e:
-                            st.warning(f"Model list failed: {inner_e}. Trying defaults.")
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            
+                        groq_client = Groq(api_key=groq_api_key)
                     except Exception as e:
-                        st.error(f"Gemini Config Error: {e}")
+                        st.error(f"Groq Init Error: {e}")
 
                 for idx, (date_str, commits) in enumerate(sorted(commits_by_date.items(), reverse=True)):
                     repos_touched = list(set([c["repo"] for c in commits]))
@@ -460,29 +449,84 @@ with tab5:
                     prob = ""
                     sol = ""
                     
-                    if model:
-                        prompt = f"""
-                        Role: Professional developer writing a daily work log.
-                        Context: Worked on {repo_text}.
-                        Input Commits:
-                        {chr(10).join(msgs)}
-                        
-                        Task:
-                        1. Summarize the work done into 1-2 professional sentences (first-person past tense). 
-                        2. Identify ONE key technical challenge/bug if present.
-                        3. Identify the solution used.
-                        
-                        Output JSON:
-                        {{
-                            "description": "...",
-                            "problem": "...",
-                            "solution": "..."
-                        }}
-                        """
+                    if groq_client:
+                        # Groq free tier is generous (14,400 RPD), but still add a small delay
+                        time.sleep(1) 
+                        prompt = f"""Role: Professional developer writing a daily work log.
+Context: Worked on {repo_text}.
+Input Commits:
+{chr(10).join(msgs)}
+
+Task:
+1. Summarize the work done into 1-2 professional sentences (first-person past tense). 
+2. Identify ONE key technical challenge/bug if present.
+3. Identify the solution used.
+4. **Select the most appropriate Activity Code** from the list below based on the work done:
+
+**Activity Codes:**
+1.1 - Conduct preliminary investigations
+2.1 - Analyze current system
+2.2 - Identify requirements and deficiencies
+2.3 - Specify requirements of proposed system
+3.2 - Design process outlines
+3.3 - User Interfaces/UX/HCI
+3.9 - UI Planning
+3.10 - Design/Develop Interactive UI Elements
+4.1 - Program design
+4.2 - Program code
+4.3 - Test programs
+4.4 - Customization of package & software
+5.1 - Testing module
+5.2 - Integration testing
+5.3 - System testing
+6.4 - Installation of software (Deployment)
+7.3 - Quality Assurance (Implementation stage)
+8.4 - Security
+9.1 - Document and/or update documentation
+9.2 - Conduct maintenance review and enhancement
+10.2 - Networking Implementation
+12.1 - Project planning
+19.2 - Implement security protocols
+19.4 - Respond to security incidents
+20.2 - Perform data analysis
+20.4 - Manage databases
+21.1 - Develop machine learning models
+21.2 - Implement AI algorithms
+22.2 - Implement cloud solutions
+23.1 - Develop software applications (general)
+23.2 - Implement DevOps practices
+23.5 - Conduct code reviews
+24.1 - Manage online store operations
+
+**Selection Guide:**
+- Bug fixes, refactoring, feature additions -> 4.2 (Program code)
+- UI/UX work, frontend changes -> 3.3 or 3.10
+- Testing, QA -> 4.3 or 5.1
+- Deployment, CI/CD -> 6.4 or 23.2
+- Documentation -> 9.1
+- Security patches -> 19.2
+- Database changes -> 20.4
+- AI/ML work -> 21.1 or 21.2
+
+Output ONLY valid JSON (no markdown, no extra text):
+{{
+    "description": "...",
+    "problem": "...",
+    "solution": "...",
+    "activity_code": "X.X"
+}}"""
                         try:
-                            response = model.generate_content(prompt)
-                            import json
-                            text = response.text
+                            response = groq_client.chat.completions.create(
+                                model="llama-3.3-70b-versatile",
+                                messages=[{
+                                    "role": "user",
+                                    "content": prompt
+                                }],
+                                temperature=0.3,
+                                max_tokens=500
+                            )
+                            text = response.choices[0].message.content
+                            # Parse JSON from response
                             start = text.find('{')
                             end = text.rfind('}') + 1
                             if start != -1 and end != -1:
@@ -490,20 +534,24 @@ with tab5:
                                 description = data.get("description", "")
                                 prob = data.get("problem", "")
                                 sol = data.get("solution", "")
+                                activity_code = data.get("activity_code", "4.2")
                             else:
                                 description = text
+                                activity_code = "4.2"
                         except Exception as e:
-                            st.warning(f"⚠️ Gemini Error on {date_str}: {e}")
+                            st.warning(f"⚠️ AI Error on {date_str}: {e}")
                             description = f"Contributed to {repo_text}. Updates include: {msgs[0]}."
+                            activity_code = "4.2"
                     
                     if not description:
                         description = f"Development work on {repo_text}. Key changes: {msgs[0]}."
                         if len(msgs) > 1:
                             description += f" Also worked on {msgs[1]}."
+                        activity_code = "4.2"  # Fallback
 
                     generated_logs.append({
                         "Date": date_str,
-                        "Activity": "1.1 - Software Development",
+                        "Activity": activity_code,
                         "Description": description,
                         "Problems": prob,
                         "Solutions": sol
