@@ -271,7 +271,12 @@ def fill_excel_sheet(template_file, data_df, start_date, end_date, output_path=N
                         if day_offset:
                             cell_desc = get_writeable_cell(new_ws, t_row + day_offset, 2)
                             if cell_desc:
-                                cell_desc.value = row_data['Description']
+                                # Append Project Name if available
+                                desc_text = row_data['Description']
+                                if 'Project' in row_data and pd.notna(row_data['Project']) and row_data['Project']:
+                                     desc_text = f"[{row_data['Project']}] {desc_text}"
+                                
+                                cell_desc.value = desc_text
                                 cell_desc.alignment = Alignment(wrap_text=True, vertical='top')
 
                             cell_code = get_writeable_cell(new_ws, t_row + day_offset, 3)
@@ -316,7 +321,7 @@ def fill_excel_sheet(template_file, data_df, start_date, end_date, output_path=N
 # --- GUI LAYOUT ---
 st.set_page_config(page_title="Placement Log Automator", page_icon="🚀", layout="wide")
 
-st.title("🚀 Industrial Placement Log Book Automator")
+st.title("Industrial Placement Log Book Automator")
 st.markdown("### Log daily. Generate Excel weekly.")
 
 # Data Loading
@@ -429,6 +434,9 @@ with tab_git:
     if gh_username:
         use_author_filter = st.checkbox(f"Filter by author: {gh_username}", value=True, help="Uncheck to see commits from everyone.")
 
+
+    data_source = st.radio("Data Source:", ["Fetch from GitHub", "Use Cached Data (fetched_commits.csv)"], horizontal=True)
+
     if st.button("🚀 Fetch & Generate Logs"):
         if not selected_repos:
             st.error("Please select at least one repository.")
@@ -445,88 +453,152 @@ with tab_git:
             
             total_repos = len(selected_repos)
             
-            for i, repo in enumerate(selected_repos):
+            for i, repo_name in enumerate(selected_repos):
+                 # Handle repo object if it's a dict or string (based on previous code it seemed to be a list of strings from multiselect)
+                repo = repo_name 
+
                 # Determine branches to scan
                 branches = []
-                if scan_all_branches:
-                    status_text.text(f"Listing branches for {repo}...")
-                    try:
-                        br_url = f"https://api.github.com/repos/{repo}/branches"
-                        br_resp = requests.get(br_url, headers=headers)
-                        if br_resp.status_code == 200:
-                            branches = [b["name"] for b in br_resp.json()]
-                        else:
-                            st.warning(f"Could not list branches for {repo}, defaulting to main.")
-                            branches = [None]
-                    except:
-                        branches = [None]
-                else:
-                    branches = [None] # None means default branch
-
-                for branch_name in branches:
-                    branch_label = branch_name if branch_name else "default"
-                    status_text.text(f"Fetching {repo} [{branch_label}]...")
-                    
-                    try:
-                        # Pagination Loop
-                        page = 1
-                        while True:
-                            url = f"https://api.github.com/repos/{repo}/commits"
-                            params = {
-                                "since": start_date.strftime('%Y-%m-%dT00:00:00Z'),
-                                "until": (end_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00Z'),
-                                "per_page": 100,
-                                "page": page
-                            }
-                            # Apply Author Filter IF checkbox is checked
-                            if gh_username and use_author_filter:
-                                params["author"] = gh_username
-                                
-                            if branch_name:
-                                params["sha"] = branch_name
-                            
-                            resp = requests.get(url, headers=headers, params=params)
-                            
-                            if resp.status_code == 200:
-                                commits = resp.json()
-                                if not commits:
-                                    break # No more commits
-                                
-                                for c in commits:
-                                    sha = c["sha"]
-                                    if sha in seen_shas:
-                                        continue # Skip duplicate
-                                    seen_shas.add(sha)
-                                    
-                                    commit_date_str = c["commit"]["author"]["date"]
-                                    dt_obj = datetime.strptime(commit_date_str, "%Y-%m-%dT%H:%M:%SZ")
-                                    date_only = dt_obj.strftime("%Y-%m-%d")
-                                    msg = c["commit"]["message"]
-                                    
-                                    all_commits.append({
-                                        "date": date_only,
-                                        "message": msg,
-                                        "repo": repo
-                                    })
-                                
-                                # Optimization: If fewer than 100 results, we reached end
-                                if len(commits) < 100:
-                                    break
-                                page += 1
-                                # Limit pages to prevent infinite loops on massive repos
-                                if page > 20: 
-                                    break
-                                    
-                            elif resp.status_code == 409:
-                                break # Empty repo
+                if scan_all_branches and data_source.startswith("Fetch from"):
+                     status_text.text(f"Listing branches for {repo}...")
+                     # ... existing branch logic ...
+                if data_source.startswith("Fetch from"):
+                    if scan_all_branches:
+                        status_text.text(f"Listing branches for {repo}...")
+                        try:
+                            br_url = f"https://api.github.com/repos/{repo}/branches"
+                            br_resp = requests.get(br_url, headers=headers)
+                            if br_resp.status_code == 200:
+                                branches = [b["name"] for b in br_resp.json()]
                             else:
-                                st.warning(f"Failed {repo}/{branch_label}: {resp.status_code}")
-                                break
-                            
-                    except Exception as e:
-                        st.error(f"Error fetching {repo}: {e}")
+                                st.warning(f"Could not list branches for {repo}, defaulting to main.")
+                                branches = [None]
+                        except:
+                            branches = [None]
+                    else:
+                        branches = [None] # None means default branch
+
+                    for branch_name in branches:
+                        branch_label = branch_name if branch_name else "default"
+                        status_text.text(f"Fetching {repo} [{branch_label}]...")
+                        
+                        try:
+                            # Pagination Loop
+                            page = 1
+                            while True:
+                                url = f"https://api.github.com/repos/{repo}/commits"
+                                params = {
+                                    "since": start_date.strftime('%Y-%m-%dT00:00:00Z'),
+                                    "until": (end_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00Z'),
+                                    "per_page": 50, # Reduced to 50 to avoid IncompleteRead on unstable connections
+                                    "page": page
+                                }
+                                # Apply Author Filter IF checkbox is checked
+                                if gh_username and use_author_filter:
+                                    params["author"] = gh_username
+                                    
+                                if branch_name:
+                                    params["sha"] = branch_name
+                                
+                                # Retry Logic for Network Instability
+                                resp = None
+                                for retry_attempt in range(3):
+                                    try:
+                                        resp = requests.get(url, headers=headers, params=params, timeout=30)
+                                        if resp.status_code == 200:
+                                            break # Success
+                                        elif resp.status_code not in [409, 500, 502, 503, 504]:
+                                            # If it's a client error (except timeouts/server errors), don't retry (e.g. 404, 401)
+                                            break
+                                    except Exception as e:
+                                        if retry_attempt == 2:
+                                            st.warning(f"Failed to fetch {repo} (Page {page}) after 3 attempts: {e}")
+                                        time.sleep(2) # Wait before retry
+                                
+                                if resp is None:
+                                    break # Failed all retries
+
+                                if resp.status_code == 200:
+                                    commits = resp.json()
+                                    if not commits:
+                                        break # No more commits
+                                    
+                                    for c in commits:
+                                        sha = c["sha"]
+                                        if sha in seen_shas:
+                                            continue # Skip duplicate
+                                        seen_shas.add(sha)
+                                        
+                                        commit_date_str = c["commit"]["author"]["date"]
+                                        dt_obj = datetime.strptime(commit_date_str, "%Y-%m-%dT%H:%M:%SZ")
+                                        date_only = dt_obj.strftime("%Y-%m-%d")
+                                        msg = c["commit"]["message"]
+                                        
+                                        all_commits.append({
+                                            "date": date_only,
+                                            "message": msg,
+                                            "repo": repo
+                                        })
+                                    
+                                    # Optimization: If fewer than 50 results, we reached end
+                                    if len(commits) < 50:
+                                        break
+                                    page += 1
+                                    # Limit pages to prevent infinite loops on massive repos
+                                    if page > 20: 
+                                        break
+                                        
+                                elif resp.status_code == 409:
+                                    break # Empty repo
+                                else:
+                                    st.warning(f"Failed {repo}/{branch_label}: {resp.status_code}")
+                                    break
+                                
+                        except Exception as e:
+                            st.error(f"Error fetching {repo}: {e}")
                 
-                progress_bar.progress((i + 1) / total_repos)
+                    progress_bar.progress((i + 1) / total_repos)
+
+            # --- END OF REPO LOOP ---
+
+            # Save to Cache if we fetched new data
+            if data_source.startswith("Fetch from") and all_commits:
+                try:
+                    df = pd.DataFrame(all_commits)
+                    df.to_csv("fetched_commits.csv", index=False)
+                    st.success(f"Saved {len(all_commits)} commits to 'fetched_commits.csv'")
+                except Exception as e:
+                    st.warning(f"Could not save cache: {e}")
+
+            # Load from Cache if selected
+            elif not data_source.startswith("Fetch from"):
+                try:
+                    if os.path.exists("fetched_commits.csv"):
+                        status_text.text("Loading from cache...")
+                        cached_df = pd.read_csv("fetched_commits.csv")
+                        
+                        # Ensure date column is datetime for proper filtering
+                        cached_df['date'] = pd.to_datetime(cached_df['date'])
+                        
+                        # Convert UI selection to datetime64 for comparison
+                        start_ts = pd.Timestamp(start_date)
+                        end_ts = pd.Timestamp(end_date)
+                        
+                        # Filter by selected date range
+                        mask = (cached_df['date'] >= start_ts) & (cached_df['date'] <= end_ts)
+                        filtered_df = cached_df.loc[mask]
+                        
+                        # Convert back to string for consistency with rest of app
+                        # (The 'date' column in all_commits is expected to be a string YYYY-MM-DD)
+                        filtered_df['date'] = filtered_df['date'].dt.strftime('%Y-%m-%d')
+                        
+                        all_commits = filtered_df.to_dict('records')
+                        
+                        st.info(f"Loaded {len(all_commits)} commits (Filtered from {len(cached_df)} in cache) based on range {start_date} to {end_date}.")
+                    else:
+                        st.error("fetched_commits.csv not found. Please fetch from GitHub first.")
+                except Exception as e:
+                    st.error(f"Error loading cache: {e}")
 
             status_text.text("Processing logs...")
             # Group by Date
@@ -602,8 +674,9 @@ with tab_git:
                     batch_context = []
                     for d_str in batch_dates:
                         commits = commits_by_date[d_str]
-                        msgs = [c["message"] for c in commits]
-                        batch_context.append(f"Date: {d_str}\nCommits:\n" + "\n".join(f"- {m}" for m in msgs))
+                        # Include Repo Name in the prompt data so AI knows the context
+                        msgs_with_repo = [f"[{c['repo']}] {c['message']}" for c in commits]
+                        batch_context.append(f"Date: {d_str}\nCommits:\n" + "\n".join(f"- {m}" for m in msgs_with_repo))
                     
                     full_batch_text = "\n\n".join(batch_context)
                     
@@ -614,10 +687,12 @@ with tab_git:
                             time.sleep(5) # Reduced to 5s as 8b is generally lighter
                             status_text.text(f"Processing Batch {b_idx+1}/{total_batches}...")
                             
-                        prompt = f"""Role: Professional software engineer writing daily logs for a university placement report.
+                        prompt = f"""Role: Software engineer writing a daily work log.
 
 Task:
-For each date below, generate a SINGLE, concise log entry (max 20 words).
+For each date below, write a natural, human-like summary of EVERYTHING done that day (max 50 words).
+The Activity should cite the Project/App name (found in brackets [Owner/Repo]) naturally.
+Style: First-person, narrative style (e.g., "I implemented the login for [Project] and fixed bugs...").
 Output must be a valid JSON Object with a key "entries" containing the list.
 
 Input Data:
@@ -649,9 +724,16 @@ Output JSON Format:
                                     # Map back to results
                                     for item in data_list:
                                         # Validate date exists in our batch
-                                        if item.get("date") in batch_dates:
+                                        log_date = item.get("date")
+                                        if log_date in batch_dates:
+                                            # Extract Project/Repo Name(s) for this date
+                                            date_commits = commits_by_date.get(log_date, [])
+                                            unique_repos = sorted(list(set(c["repo"] for c in date_commits)))
+                                            project_name = ", ".join(unique_repos)
+
                                             generated_logs.append({
-                                                "Date": item["date"],
+                                                "Date": log_date,
+                                                "Project": project_name,
                                                 "Activity": item.get("activity_code", "4.2"),
                                                 "Description": item.get("description", ""),
                                                 "Problems": item.get("problem", ""),
@@ -933,7 +1015,15 @@ with tab_excel:
 
 # --- TAB 5: HISTORY ---
 with tab_hist:
-    st.dataframe(df.sort_values(by="Date", ascending=False), use_container_width=True)
+    if not df.empty:
+        # Check if Date column exists before sorting
+        if "Date" in df.columns:
+            st.dataframe(df.sort_values(by="Date", ascending=False), use_container_width=True)
+        else:
+            st.dataframe(df, use_container_width=True)
+            st.warning("Date column missing from logs.")
+    else:
+        st.info("No logs found.")
     if st.button("Clear All Data (Reset)"):
         if os.path.exists(FILE_NAME):
             os.remove(FILE_NAME)
