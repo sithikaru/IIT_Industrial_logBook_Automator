@@ -76,115 +76,238 @@ def get_week_start(date_obj):
     """Returns the Monday of the week for the given date."""
     return date_obj - timedelta(days=date_obj.weekday())
 
-def fill_excel_sheet(template_file, data_df, output_path=None):
+import copy
+
+def copy_range(ws, src_min_row, src_max_row, src_min_col, src_max_col, dest_min_row):
     """
-    Smart function to find the right week block and fill it.
-    If output_path is set, saves directly to disk. Otherwise returns bytes.
+    Copies a range of cells (values + styles + merges) to a new row offset.
+    Returns the number of rows copied.
+    """
+    rows_count = src_max_row - src_min_row + 1
+    dest_max_row = dest_min_row + rows_count - 1
+    dest_min_col = src_min_col
+    dest_max_col = src_max_col
+    
+    # 0. Cleanup Destination Merges
+    # If the destination has existing merges, we must unmerge them first to allow writing values.
+    # Otherwise we hit 'MergedCell' read-only errors.
+    for merged_range in list(ws.merged_cells.ranges):
+        # Check for overlap
+        if (merged_range.min_row <= dest_max_row and merged_range.max_row >= dest_min_row and
+            merged_range.min_col <= dest_max_col and merged_range.max_col >= dest_min_col):
+            try:
+                ws.unmerge_cells(start_row=merged_range.min_row, start_column=merged_range.min_col,
+                                 end_row=merged_range.max_row, end_column=merged_range.max_col)
+            except KeyError:
+                # Cell might be missing from internal index if rows were deleted beforehand
+                pass
+
+    # 1. Copy Cells
+    for row_offset in range(rows_count):
+        src_row = src_min_row + row_offset
+        dest_row = dest_min_row + row_offset
+        
+        for col in range(src_min_col, src_max_col + 1):
+            src_cell = ws.cell(row=src_row, column=col)
+            dest_cell = ws.cell(row=dest_row, column=col)
+            
+            # Copy value
+            dest_cell.value = src_cell.value
+            
+            # Copy style (simplified: alignment, font, border, fill)
+            if src_cell.has_style:
+                dest_cell.font = copy.copy(src_cell.font)
+                dest_cell.border = copy.copy(src_cell.border)
+                dest_cell.fill = copy.copy(src_cell.fill)
+                dest_cell.number_format = copy.copy(src_cell.number_format)
+                dest_cell.protection = copy.copy(src_cell.protection)
+                dest_cell.alignment = copy.copy(src_cell.alignment)
+
+    # 2. Copy Merged Cells
+    # We need to find merges in the source range and map them to the dest range
+    # Iterate over a COPY of the ranges because merge_cells modifies the collection
+    for merged_range in list(ws.merged_cells.ranges):
+        if (merged_range.min_row >= src_min_row and 
+            merged_range.max_row <= src_max_row and
+            merged_range.min_col >= src_min_col and 
+            merged_range.max_col <= src_max_col):
+            
+            # Calculate offset
+            offset_row = dest_min_row - src_min_row
+            
+            new_min_row = merged_range.min_row + offset_row
+            new_max_row = merged_range.max_row + offset_row
+            new_min_col = merged_range.min_col
+            new_max_col = merged_range.max_col
+            
+            ws.merge_cells(start_row=new_min_row, start_column=new_min_col, 
+                           end_row=new_max_row, end_column=new_max_col)
+            
+    return rows_count
+
+def fill_excel_sheet(template_file, data_df, start_date, end_date, output_path=None):
+    """
+    Refactored to:
+    1. Create one sheet per Month between start_date and end_date.
+    2. Dynamically generate 4 or 5 tables per sheet based on Sundays.
+    3. Fill tables with data for that month.
     """
     wb = openpyxl.load_workbook(template_file)
-    # Assume the sheet is named 'Logs' or is the 3rd sheet. 
-    # We'll try to find 'Logs' or default to active.
+    
+    # Identify Template Sheet
     if 'Logs' in wb.sheetnames:
-        ws = wb['Logs']
+        template_ws = wb['Logs']
     else:
-        ws = wb.active
-
-    # Group data by Week Ending
-    grouped = data_df.groupby('Week_Ending')
-
-    # Iterate through all rows to find "WEEK ENDING" anchors
-    # We scan the first column (Column A)
-    anchor_rows = []
-    for row in range(1, 1000):  # Scan first 1000 rows
-        # Column 1 (A)
-        c1 = ws.cell(row=row, column=1)
-        if c1.value:
-            val_str = str(c1.value).upper()
-            if "WEEK ENDING" in val_str:
-                anchor_rows.append(row)
-            elif "DESIGNATION" in val_str:
-                c1.value = None  # Clear Designation
-
-        # Column 2 (B) - Check if Designation is here too/instead
-        c2 = ws.cell(row=row, column=2)
-        if c2.value and "DESIGNATION" in str(c2.value).upper():
-            c2.value = None
+        template_ws = wb.active
+        
+    template_ws.title = "Template" # Rename for clarity
+    
+    # --- 1. Identify Template Range ---
+    start_row = None
+    for row in range(1, 100):
+        c = template_ws.cell(row=row, column=1)
+        if c.value and "WEEK ENDING" in str(c.value).upper():
+            start_row = row
+            break
             
-    if not anchor_rows:
-        return None, "Could not find 'WEEK ENDING' blocks in the Excel file. Is it the correct format?"
+    if not start_row:
+        return None, "Could not find 'WEEK ENDING' in the template."
 
-    # --- FILLING LOGIC ---
-    # We iterate through the weeks we have data for
-    for week_date_str, group in grouped:
-        target_found = False
+    TEMPLATE_ROW_COUNT = 21 # Assumed block size
+    
+    # Convert dates
+    data_df['Week_Ending_Dt'] = pd.to_datetime(data_df['Week_Ending'])
+    
+    current_date = start_date.replace(day=1)
+    
+    # Iterate Months
+    while current_date <= end_date:
+        month_name = current_date.strftime("%b %Y")
         
-        # 1. Try to find a block already labeled with this date
-        for r in anchor_rows:
-            date_cell = ws.cell(row=r, column=2)
-            # Check if cell matches date (handling string or datetime formats)
-            cell_date_str = str(date_cell.value) if date_cell.value else ""
-            if week_date_str in cell_date_str:
-                target_row = r
-                target_found = True
-                break
+        # Create new sheet from template
+        new_ws = wb.copy_worksheet(template_ws)
+        new_ws.title = month_name
         
-        # 2. If not found, find the first EMPTY block
-        if not target_found:
-            for r in anchor_rows:
-                date_cell = ws.cell(row=r, column=2)
-                if not date_cell.value or "____" in str(date_cell.value):  # It's empty or a placeholder! Claim it.
-                    target_row = r
-                    # Write the date
-                    date_cell.value = week_date_str
-                    target_found = True
-                    break
+        # --- CLEANUP: Keep only the first template block ---
+        # We assume the first block (start_row to +TEMPLATE_ROW_COUNT) is the master.
+        # Delete everything below it to avoid junk from the template file.
+        cutoff_row = start_row + TEMPLATE_ROW_COUNT
+        rows_to_delete = new_ws.max_row - cutoff_row + 10
+        if rows_to_delete > 0:
+            new_ws.delete_rows(cutoff_row, amount=rows_to_delete)
         
-        if target_found:
-            # Fill Daily Entries
-            # Map: Monday is Row+2, Tuesday Row+3, etc.
-            day_map = {
-                "MONDAY": 2, "TUESDAY": 3, "WEDNESDAY": 4, 
-                "THURSDAY": 5, "FRIDAY": 6, "SATURDAY": 7, "SUNDAY": 8
-            }
+        # Get Sundays in this month
+        # Start from 1st of month
+        curr_mon = current_date
+        next_mon = (curr_mon.replace(day=28) + timedelta(days=4)).replace(day=1) # Advance to next month 1st
+        
+        # Find first Sunday
+        d = curr_mon
+        while d.weekday() != 6: # 6 = Sunday
+            d += timedelta(days=1)
             
-            problems_list = []
-            solutions_list = []
+        month_sundays = []
+        while d < next_mon:
+            month_sundays.append(d)
+            d += timedelta(days=7)
+            
+        # Target Sundays is ALL of them (4 or 5)
+        target_sundays = month_sundays
+        num_tables = len(target_sundays)
+        
+        # Determine table positions
+        tables_start_rows = []
+        for i in range(num_tables):
+            tables_start_rows.append(start_row + (TEMPLATE_ROW_COUNT + 1) * i)
+        
+        # Copy template to additional positions
+        # Note: Position 0 is already there (from the sheet copy).
+        # We copy for i=1 to N-1
+        for t_row in tables_start_rows[1:]:
+            copy_range(new_ws, start_row, start_row + TEMPLATE_ROW_COUNT - 1, 1, 20, t_row)
+        
+        # Fill Tables
+        day_map = {
+            "MONDAY": 2, "TUESDAY": 3, "WEDNESDAY": 4, 
+            "THURSDAY": 5, "FRIDAY": 6, "SATURDAY": 7, "SUNDAY": 8
+        }
+        
+        for idx, t_row in enumerate(tables_start_rows):
+            # Clear critical cells first (Date, Desc, Code, Probs) - in case Template had junk
+            # Date
+            c = get_writeable_cell(new_ws, t_row, 2)
+            if c: c.value = None
+            
+            # Prob/Sol
+            c = get_writeable_cell(new_ws, t_row + 10, 2)
+            if c: c.value = None
+            c = get_writeable_cell(new_ws, t_row + 10, 3)
+            if c: c.value = None
+            
+            # Days
+            for i in range(2, 9):
+                c = get_writeable_cell(new_ws, t_row + i, 2)
+                if c: c.value = None
+                c = get_writeable_cell(new_ws, t_row + i, 3)
+                if c: c.value = None
 
-            for _, row_data in group.iterrows():
-                day_offset = day_map.get(row_data['Day'], None)
-                if day_offset:
-                    # Description -> Column B (2)
-                    cell_desc = ws.cell(row=target_row + day_offset, column=2)
-                    cell_desc.value = row_data['Description']
-                    cell_desc.alignment = Alignment(wrap_text=True, vertical='top')
+            if idx < len(target_sundays):
+                week_dt = target_sundays[idx]
+                week_str = week_dt.strftime("%Y-%m-%d")
+                
+                # Fill Date
+                date_cell = get_writeable_cell(new_ws, t_row, 2)
+                if date_cell:
+                    date_cell.value = week_str
+                    date_cell.alignment = Alignment(horizontal='left')
+                
+                # Fill Data
+                week_data = data_df[data_df['Week_Ending'] == week_str]
+                if not week_data.empty:
+                    problems_list = []
+                    solutions_list = []
+                    for _, row_data in week_data.iterrows():
+                        day_offset = day_map.get(row_data['Day'], None)
+                        if day_offset:
+                            cell_desc = get_writeable_cell(new_ws, t_row + day_offset, 2)
+                            if cell_desc:
+                                cell_desc.value = row_data['Description']
+                                cell_desc.alignment = Alignment(wrap_text=True, vertical='top')
 
-                    # Activity Code -> Column C (3)
-                    cell_code = ws.cell(row=target_row + day_offset, column=3)
-                    cell_code.value = row_data['Activity_Code']
-                    cell_code.alignment = Alignment(horizontal='center', vertical='top')
+                            cell_code = get_writeable_cell(new_ws, t_row + day_offset, 3)
+                            if cell_code:
+                                cell_code.value = row_data['Activity_Code']
+                                cell_code.alignment = Alignment(horizontal='center', vertical='top')
+                            
+                            if pd.notna(row_data['Problems']) and str(row_data['Problems']).strip():
+                                problems_list.append(str(row_data['Problems']))
+                            if pd.notna(row_data['Solutions']) and str(row_data['Solutions']).strip():
+                                solutions_list.append(str(row_data['Solutions']))
 
-                    # Collect Problems/Solutions
-                    if pd.notna(row_data['Problems']) and str(row_data['Problems']).strip():
-                        problems_list.append(str(row_data['Problems']))
-                    if pd.notna(row_data['Solutions']) and str(row_data['Solutions']).strip():
-                        solutions_list.append(str(row_data['Solutions']))
+                    if problems_list:
+                        cell = get_writeable_cell(new_ws, t_row + 10, 2)
+                        if cell:
+                            cell.value = "\n".join(problems_list)
+                            cell.alignment = Alignment(wrap_text=True, vertical='top')
+                    if solutions_list:
+                        cell = get_writeable_cell(new_ws, t_row + 10, 3)
+                        if cell:
+                            cell.value = "\n".join(solutions_list)
+                            cell.alignment = Alignment(wrap_text=True, vertical='top')
 
-            # Fill Problems & Solutions (Row + 10)
-            if problems_list:
-                cell = get_writeable_cell(ws, target_row + 10, 2)
-                cell.value = "\n".join(problems_list)
-                cell.alignment = Alignment(wrap_text=True, vertical='top')
-            if solutions_list:
-                cell = get_writeable_cell(ws, target_row + 10, 3)
-                cell.value = "\n".join(solutions_list)
-                cell.alignment = Alignment(wrap_text=True, vertical='top')
+        # Advance to next month
+        current_date = next_mon
+
+    # Move Template to end or hide it?
+    # Let's just delete it to be clean, as requested "created ... tabs"
+    if 'Template' in wb.sheetnames:
+        del wb['Template']
 
     # Save
     if output_path:
         wb.save(output_path)
         return None, "Saved directly to file."
     
-    # Save to buffer
     output = BytesIO()
     wb.save(output)
     output.seek(0)
@@ -764,13 +887,23 @@ with tab3:
     if not final_file:
         final_file = st.file_uploader("Upload Record Book (.xlsx)", type=["xlsx"])
     
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        gen_start_date = st.date_input("Generation Start Date", datetime(2025, 12, 15))
+    with col_d2:
+        gen_end_date = st.date_input("Generation End Date", datetime(2026, 1, 14))
+
     if final_file and not df.empty:
         if st.button("⚡ Fill Excel Sheet"):
             with st.spinner("Processing..."):
                 # If using the local file directly, output to the same path
                 save_path = local_file_name if (final_file == local_file_name) else None
                 
-                processed_excel, msg = fill_excel_sheet(final_file, df, output_path=save_path)
+                # Convert to datetime objects for function
+                start_dt = datetime.combine(gen_start_date, datetime.min.time())
+                end_dt = datetime.combine(gen_end_date, datetime.min.time())
+
+                processed_excel, msg = fill_excel_sheet(final_file, df, start_dt, end_dt, output_path=save_path)
                 
                 if save_path and processed_excel is None:
                     # Direct save case
