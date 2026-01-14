@@ -315,13 +315,6 @@ with tab5:
             if gh_token:
                 headers["Authorization"] = f"token {gh_token}"
             
-            # Use Gemini Logic...
-            if gemini_api_key:
-                genai.configure(api_key=gemini_api_key)
-                model = genai.GenerativeModel('gemini-pro')
-            else:
-                model = None
-
             all_commits = []
             seen_shas = set() # To store unique commit SHAs
 
