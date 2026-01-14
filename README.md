@@ -73,7 +73,7 @@ The app will open automatically in your default web browser (usually at `http://
 ## 📖 User Guide
 
 ### 1. 🤖 Bulk Auto-Fill (Git) - *Recommended*
-![Bulk Auto-Fill Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_git_tab_1768393388897.png)
+![Bulk Auto-Fill Tab](docs/images/screenshot_git_tab.png)
 
 This is the main feature. It looks at your code commits and writes your logs for you.
 
@@ -92,7 +92,7 @@ This is the main feature. It looks at your code commits and writes your logs for
 6.  **Review & Save**: Edit any entries in the preview table if needed, then click **Save to Record Book**.
 
 ### 2. 📝 Daily Log
-![Daily Log Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_daily_tab_1768393422829.png)
+![Daily Log Tab](docs/images/screenshot_daily_tab.png)
 
 Use this for days where you didn't push code or need to add a manual entry.
 -   Select the Date and Activity Code.
@@ -101,7 +101,7 @@ Use this for days where you didn't push code or need to add a manual entry.
 -   Click **Add Entry**.
 
 ### 3. 🗓️ Manual Weekly Fill
-![Manual Weekly Fill Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_weekly_tab_1768393452729.png)
+![Manual Weekly Fill Tab](docs/images/screenshot_weekly_tab.png)
 
 Useful for backfilling older weeks quickly without Git data.
 -   Select the Month and Year.
@@ -109,7 +109,7 @@ Useful for backfilling older weeks quickly without Git data.
 -   Click **Save Week**.
 
 ### 4. ⚙️ Excel Automator
-![Excel Automator Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_excel_tab_1768393475603.png)
+![Excel Automator Tab](docs/images/screenshot_excel_tab.png)
 
 This generates the final file you submit to university.
 1.  **Upload Template**: Upload your university's `.xlsx` template file.
@@ -118,7 +118,7 @@ This generates the final file you submit to university.
 3.  **Download**: Click **Generate Excel** to get your filled file.
 
 ### 5. 📜 History
-![History Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_history_tab_1768393490983.png)
+![History Tab](docs/images/screenshot_history_tab.png)
 
 -   View all your saved logs in a master table.
 -   Sort by date to see your progress.
