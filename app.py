@@ -323,7 +323,7 @@ st.markdown("### Log daily. Generate Excel weekly.")
 df = load_data()
 
 # --- TABS ---
-tab1, tab2, tab5, tab3, tab4 = st.tabs(["📝 Daily Log", "📚 Bulk Backfill", "🐙 Git Import", "🤖 Excel Automator", "📊 History"])
+tab_git, tab_daily, tab_manual, tab_excel, tab_hist = st.tabs(["🚀 Bulk Auto-Fill (Git)", "📝 Daily Log", "📚 Manual Weekly Fill", "🤖 Excel Automator", "📊 History"])
 
 import subprocess
 import requests
@@ -333,10 +333,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# --- TAB 5: GITHUB IMPORT ---
-with tab5:
+# --- TAB 1: GITHUB IMPORT (MAIN) ---
+with tab_git:
     st.header("☁️ GitHub History Importer")
-    st.info("Fetch commit history directly from GitHub.com to generate logs. No local .git folder needed!")
 
     # Load Config from Env
     gh_username = os.getenv("GITHUB_USERNAME", "")
@@ -399,7 +398,7 @@ with tab5:
                 st.error(f"Failed to fetch repositories: {e}")
 
     # Allow selection from fetched list OR manual entry
-    default_options = st.session_state.my_github_repos if st.session_state.my_github_repos else ["sithija/viral-networks-fe-main", "sithija/yeheli-web-strapi-main"]
+    default_options = st.session_state.my_github_repos if st.session_state.my_github_repos else ["owner/repository-name"]
     
     selected_repos = st.multiselect(
         "Choose Repositories", 
@@ -411,7 +410,7 @@ with tab5:
     if not st.session_state.my_github_repos:
         st.caption("Or type manually below if fetch fails:")
         manual_entry = st.text_area("Manual Repo List (owner/repo)", height=68, 
-                                    value="sithija/viral-networks-fe-main\nsithija/yeheli-web-strapi-main")
+                                    value="owner/repository-name")
         if manual_entry:
             manual_list = [r.strip() for r in manual_entry.split('\n') if r.strip()]
             # Combine unique
@@ -547,6 +546,7 @@ with tab5:
                 
                 gen_progress = st.progress(0, text="Summarizing with AI..." if groq_api_key else "Summarizing...")
                 
+
                 # Initialize Groq Client
                 groq_client = None
                 if groq_api_key:
@@ -555,124 +555,132 @@ with tab5:
                     except Exception as e:
                         st.error(f"Groq Init Error: {e}")
 
-                for idx, (date_str, commits) in enumerate(sorted(commits_by_date.items(), reverse=True)):
-                    repos_touched = list(set([c["repo"] for c in commits]))
-                    msgs = [c["message"] for c in commits] # Use ALL messages for context
+                def make_groq_request(client, prompt, retries=3):
+                    """
+                    Tries to get a completion with exponential backoff and model fallback.
+                    Models: llama-3.1-8b-instant -> llama-3.3-70b-versatile
+                    """
+                    # Swapped order: 8b is faster and often has better rate limits
+                    models = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
                     
-                    repo_text = ", ".join([r.split('/')[-1] for r in repos_touched]) # Just repo name
+                    for model in models:
+                        for attempt in range(retries):
+                            try:
+                                return client.chat.completions.create(
+                                    model=model,
+                                    messages=[{"role": "user", "content": prompt}],
+                                    temperature=0.3,
+                                    max_tokens=6000, # More tokens for batch response
+                                    response_format={"type": "json_object"} # STRICT JSON MODE
+                                )
+                            except Exception as e:
+                                # Check for Rate Limit (429)
+                                is_rate_limit = "429" in str(e) or (hasattr(e, 'status_code') and e.status_code == 429)
+                                
+                                if is_rate_limit:
+                                    wait_time = 2 ** (attempt + 1) # 2, 4, 8 seconds
+                                    if attempt < retries - 1:
+                                        print(f"Rate limit on {model}. Retrying in {wait_time}s...")
+                                        time.sleep(wait_time)
+                                    else:
+                                        print(f"Giving up on {model} after {retries} attempts.")
+                                else:
+                                    print(f"Error on {model}: {e}")
+                                    break # Try next model immediately
+                                    
+                    return None # All failed
+
+                # Prepare batches
+                sorted_dates = sorted(commits_by_date.keys(), reverse=True)
+                BATCH_SIZE = 3 
+                batches = [sorted_dates[i:i + BATCH_SIZE] for i in range(0, len(sorted_dates), BATCH_SIZE)]
+                
+                total_batches = len(batches)
+                
+                for b_idx, batch_dates in enumerate(batches):
+                    # Construct Prompt for the entire batch
+                    batch_context = []
+                    for d_str in batch_dates:
+                        commits = commits_by_date[d_str]
+                        msgs = [c["message"] for c in commits]
+                        batch_context.append(f"Date: {d_str}\nCommits:\n" + "\n".join(f"- {m}" for m in msgs))
                     
-                    description = ""
-                    prob = ""
-                    sol = ""
+                    full_batch_text = "\n\n".join(batch_context)
                     
                     if groq_client:
-                        # Groq free tier is generous (14,400 RPD), but still add a small delay
-                        time.sleep(1) 
-                        prompt = f"""Role: Professional developer writing a daily work log.
-Context: Worked on {repo_text}.
-Input Commits:
-{chr(10).join(msgs)}
+                        # Keep strict delay for safety, can reduce later if 8b proves robust
+                        if b_idx > 0:
+                            status_text.text(f"⏳ Throttling for 5s (Model Switch) to respect Rate Limits...")
+                            time.sleep(5) # Reduced to 5s as 8b is generally lighter
+                            status_text.text(f"Processing Batch {b_idx+1}/{total_batches}...")
+                            
+                        prompt = f"""Role: Professional software engineer writing daily logs for a university placement report.
 
 Task:
-1. Summarize the work done into 1-2 professional sentences (first-person past tense). 
-2. Identify ONE key technical challenge/bug if present.
-3. Identify the solution used.
-4. **Select the most appropriate Activity Code** from the list below based on the work done:
+For each date below, generate a SINGLE, concise log entry (max 20 words).
+Output must be a valid JSON Object with a key "entries" containing the list.
 
-**Activity Codes:**
-1.1 - Conduct preliminary investigations
-2.1 - Analyze current system
-2.2 - Identify requirements and deficiencies
-2.3 - Specify requirements of proposed system
-3.2 - Design process outlines
-3.3 - User Interfaces/UX/HCI
-3.9 - UI Planning
-3.10 - Design/Develop Interactive UI Elements
-4.1 - Program design
-4.2 - Program code
-4.3 - Test programs
-4.4 - Customization of package & software
-5.1 - Testing module
-5.2 - Integration testing
-5.3 - System testing
-6.4 - Installation of software (Deployment)
-7.3 - Quality Assurance (Implementation stage)
-8.4 - Security
-9.1 - Document and/or update documentation
-9.2 - Conduct maintenance review and enhancement
-10.2 - Networking Implementation
-12.1 - Project planning
-19.2 - Implement security protocols
-19.4 - Respond to security incidents
-20.2 - Perform data analysis
-20.4 - Manage databases
-21.1 - Develop machine learning models
-21.2 - Implement AI algorithms
-22.2 - Implement cloud solutions
-23.1 - Develop software applications (general)
-23.2 - Implement DevOps practices
-23.5 - Conduct code reviews
-24.1 - Manage online store operations
+Input Data:
+{full_batch_text}
 
-**Selection Guide:**
-- Bug fixes, refactoring, feature additions -> 4.2 (Program code)
-- UI/UX work, frontend changes -> 3.3 or 3.10
-- Testing, QA -> 4.3 or 5.1
-- Deployment, CI/CD -> 6.4 or 23.2
-- Documentation -> 9.1
-- Security patches -> 19.2
-- Database changes -> 20.4
-- AI/ML work -> 21.1 or 21.2
-
-Output ONLY valid JSON (no markdown, no extra text):
+Output JSON Format:
 {{
-    "description": "...",
-    "problem": "...",
-    "solution": "...",
-    "activity_code": "X.X"
-}}"""
+    "entries": [
+        {{
+            "date": "YYYY-MM-DD",
+            "description": "Implemented login...",
+            "activity_code": "4.2",
+            "problem": "...",
+            "solution": "..."
+        }}
+    ]
+}}
+"""
                         try:
-                            response = groq_client.chat.completions.create(
-                                model="llama-3.3-70b-versatile",
-                                messages=[{
-                                    "role": "user",
-                                    "content": prompt
-                                }],
-                                temperature=0.3,
-                                max_tokens=500
-                            )
-                            text = response.choices[0].message.content
-                            # Parse JSON from response
-                            start = text.find('{')
-                            end = text.rfind('}') + 1
-                            if start != -1 and end != -1:
-                                data = json.loads(text[start:end])
-                                description = data.get("description", "")
-                                prob = data.get("problem", "")
-                                sol = data.get("solution", "")
-                                activity_code = data.get("activity_code", "4.2")
+                            response = make_groq_request(groq_client, prompt)
+                            
+                            if response:
+                                text = response.choices[0].message.content
+                                try:
+                                    # With strict JSON mode, we should just load it directly
+                                    data = json.loads(text)
+                                    data_list = data.get("entries", [])
+                                    
+                                    # Map back to results
+                                    for item in data_list:
+                                        # Validate date exists in our batch
+                                        if item.get("date") in batch_dates:
+                                            generated_logs.append({
+                                                "Date": item["date"],
+                                                "Activity": item.get("activity_code", "4.2"),
+                                                "Description": item.get("description", ""),
+                                                "Problems": item.get("problem", ""),
+                                                "Solutions": item.get("solution", "")
+                                            })
+                                except json.JSONDecodeError:
+                                    st.warning(f"⚠️ JSON Parse Error for batch {b_idx+1}. Raw: {text[:100]}...")
                             else:
-                                description = text
-                                activity_code = "4.2"
+                                st.error(f"❌ Batch {b_idx+1} failed after retries.")
+                                
                         except Exception as e:
-                            st.warning(f"⚠️ AI Error on {date_str}: {e}")
-                            description = f"Contributed to {repo_text}. Updates include: {msgs[0]}."
-                            activity_code = "4.2"
-                    
-                    if not description:
-                        description = f"Development work on {repo_text}. Key changes: {msgs[0]}."
-                        if len(msgs) > 1:
-                            description += f" Also worked on {msgs[1]}."
-                        activity_code = "4.2"  # Fallback
+                            st.warning(f"⚠️ Batch Error: {e}")
 
-                    generated_logs.append({
-                        "Date": date_str,
-                        "Activity": activity_code,
-                        "Description": description,
-                        "Problems": prob,
-                        "Solutions": sol
-                    })
-                    gen_progress.progress((idx + 1) / total_days)
+                    else:
+                        # Fallback if no Groq Key (Manual fill)
+                        for d_str in batch_dates:
+                            commits = commits_by_date[d_str]
+                            msgs = [c["message"] for c in commits]
+                            repo_text = ", ".join(list(set([c["repo"] for c in commits])))
+                            generated_logs.append({
+                                "Date": d_str,
+                                "Activity": "4.2",
+                                "Description": f"Worked on {repo_text}. Commits: {msgs[0]}",
+                                "Problems": "",
+                                "Solutions": ""
+                            })
+
+                    # Update Progress
+                    gen_progress.progress((b_idx + 1) / total_batches)
 
                 generated_logs.sort(key=lambda x: x["Date"])
                 st.session_state.generated_git_logs = pd.DataFrame(generated_logs)
@@ -700,8 +708,8 @@ Output ONLY valid JSON (no markdown, no extra text):
             time.sleep(2)
             st.rerun()
 
-# --- TAB 1: DAILY LOG ---
-with tab1:
+# --- TAB 2: DAILY LOG ---
+with tab_daily:
     st.header("📝 Daily Entry")
     
     # Initialize session state for daily form reset
@@ -749,8 +757,8 @@ with tab1:
 
 import time
 
-# --- TAB 2: BULK BACKFILL ---
-with tab2:
+# --- TAB 3: MANUAL BULK ENTRY ---
+with tab_manual:
     st.header("📚 Bulk Week Entry")
     st.info("Select any day in a week. We'll load Monday to Friday for rapid entry.")
     
@@ -869,8 +877,8 @@ with tab2:
             else:
                 st.warning("⚠️ No descriptions entered. Nothing saved.")
 
-# --- TAB 3: EXCEL AUTOMATOR ---
-with tab3:
+# --- TAB 4: EXCEL AUTOMATOR ---
+with tab_excel:
     st.header("Fill your IIT Record Book")
     st.info("The app will find empty weeks and fill them with your logs.")
     
@@ -923,8 +931,8 @@ with tab3:
     elif df.empty:
         st.warning("No logs found! Go to the 'Daily Log' tab and add some entries first.")
 
-# --- TAB 4: HISTORY ---
-with tab4:
+# --- TAB 5: HISTORY ---
+with tab_hist:
     st.dataframe(df.sort_values(by="Date", ascending=False), use_container_width=True)
     if st.button("Clear All Data (Reset)"):
         if os.path.exists(FILE_NAME):
