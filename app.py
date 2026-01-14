@@ -204,6 +204,10 @@ tab1, tab2, tab5, tab3, tab4 = st.tabs(["📝 Daily Log", "📚 Bulk Backfill", 
 import subprocess
 import requests
 import google.generativeai as genai
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # --- TAB 5: GITHUB IMPORT ---
 with tab5:
@@ -214,17 +218,124 @@ with tab5:
     with st.expander("⚙️ Configuration", expanded=True):
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            gh_username = st.text_input("GitHub Username", value="zijja")
-            gh_token = st.text_input("GitHub Token (Required for Private Repos)", type="password", help="Generate a Fine-grained Token or PAT from GitHub settings.")
+            gh_username = st.text_input("GitHub Username (Optional - Leave empty for ALL authors)", value="")
+            gh_branch = st.text_input("Branch (Optional - Default is main/master)", value="")
+            # Load from env, allow override
+            env_gh_token = os.getenv("GITHUB_TOKEN", "")
+            gh_token = st.text_input("GitHub Token (Required for Private Repos)", value=env_gh_token, type="password", help="Loaded from .env if available")
         with col_g2:
-            gemini_api_key = st.text_input("Gemini API Key (Optional)", type="password")
+            # Load from env, allow override
+            env_gemini_key = os.getenv("GEMINI_API_KEY", "")
+            gemini_api_key = st.text_input("Gemini API Key (Optional)", value=env_gemini_key, type="password", help="Loaded from .env if available")
 
-    # 2. Repo Input
+    # 1.1 Debug Token
+    with st.expander("🛠️ Debug Token Access"):
+        if st.button("Test Token Permissions"):
+            if not gh_token:
+                st.error("No token provided.")
+            else:
+                try:
+                    # 1. Check Identity
+                    headers = {"Authorization": f"token {gh_token}"}
+                    user_resp = requests.get("https://api.github.com/user", headers=headers)
+                    if user_resp.status_code == 200:
+                        st.success(f"Authenticated as: **{user_resp.json()['login']}**")
+                    else:
+                        st.error(f"Authentication failed: {user_resp.status_code}")
+                    
+                    # 2. Check Orgs
+                    orgs_resp = requests.get("https://api.github.com/user/orgs", headers=headers)
+                    if orgs_resp.status_code == 200:
+                        orgs = [o['login'] for o in orgs_resp.json()]
+                        st.write(f"Visible Organizations: `{', '.join(orgs)}`")
+                        if "Inforwaves" not in orgs:
+                             st.warning("⚠️ 'Inforwaves' is missing.")
+                             
+                             # 3. Deep Probe
+                             st.info("🔬 Running deep probe on 'Inforwaves/viral-networks-fe'...")
+                             probe = requests.get("https://api.github.com/repos/Inforwaves/viral-networks-fe", headers=headers)
+                             if probe.status_code == 200:
+                                 st.success("✅ **SUCCESS!** The token CAN access 'Inforwaves/viral-networks-fe' directly! You can use the Manual Entry box below.")
+                             elif probe.status_code == 404:
+                                 st.error("❌ Repo not found (404). Token cannot see it.")
+                             elif probe.status_code == 403:
+                                 st.error("❌ Access Forbidden (403).")
+                                 sso_header = probe.headers.get('x-github-sso')
+                                 if sso_header:
+                                     st.error(f"🔐 **SSO REQUIRED:** GitHub says: `{sso_header}`. You MUST click 'Configure SSO' on your token.")
+                                 else:
+                                     st.error("Reason unknown. Check 'repo' scope.")
+                    else:
+                        st.error("Failed to fetch organizations.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # 2. Repo Selection
     st.subheader("Select Repositories")
-    default_repos = "sithija/viral-networks-fe-main\nsithija/yeheli-web-strapi-main" 
-    repo_input = st.text_area("List Repositories (owner/repo_name)", value=default_repos, height=100, help="One per line. Example: openai/streamlit")
     
-    selected_repos = [r.strip() for r in repo_input.split('\n') if r.strip()]
+    if "my_github_repos" not in st.session_state:
+        st.session_state.my_github_repos = []
+
+    col_btn, col_manual = st.columns([1, 2])
+    with col_btn:
+        if st.button("🔄 Fetch Your Repositories"):
+            try:
+                found_repos = []
+                page = 1
+                while True:
+                    if gh_token:
+                        # Authenticated: Get all accessible repos (private & public)
+                        url = "https://api.github.com/user/repos"
+                        headers = {"Authorization": f"token {gh_token}", "Accept": "application/vnd.github.v3+json"}
+                        params = {"per_page": 100, "page": page, "affiliation": "owner,collaborator,organization_member", "sort": "updated"}
+                    else:
+                        # Public only
+                        url = f"https://api.github.com/users/{gh_username}/repos"
+                        headers = {"Accept": "application/vnd.github.v3+json"}
+                        params = {"per_page": 100, "page": page, "sort": "updated"}
+                    
+                    resp = requests.get(url, headers=headers, params=params)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if not data:
+                            break # No more pages
+                        for r in data:
+                            found_repos.append(r["full_name"])
+                        page += 1
+                        # Safety break for massive accounts (limit to 300 for now)
+                        if page > 3: 
+                            break
+                    else:
+                        st.error(f"Error fetching repos: {resp.status_code} - {resp.text}")
+                        break
+                
+                if found_repos:
+                    st.session_state.my_github_repos = sorted(list(set(found_repos)))
+                    st.success(f"Found {len(found_repos)} repositories!")
+                else:
+                    st.warning("No repositories found.")
+                    
+            except Exception as e:
+                st.error(f"Failed to fetch repositories: {e}")
+
+    # Allow selection from fetched list OR manual entry
+    default_options = st.session_state.my_github_repos if st.session_state.my_github_repos else ["sithija/viral-networks-fe-main", "sithija/yeheli-web-strapi-main"]
+    
+    selected_repos = st.multiselect(
+        "Choose Repositories", 
+        st.session_state.my_github_repos if st.session_state.my_github_repos else default_options,
+        default=[] # Start empty so user can choose
+    )
+    
+    # Fallback for manual addition if fetch fails or repo missing
+    if not st.session_state.my_github_repos:
+        st.caption("Or type manually below if fetch fails:")
+        manual_entry = st.text_area("Manual Repo List (owner/repo)", height=68, 
+                                    value="sithija/viral-networks-fe-main\nsithija/yeheli-web-strapi-main")
+        if manual_entry:
+            manual_list = [r.strip() for r in manual_entry.split('\n') if r.strip()]
+            # Combine unique
+            selected_repos = list(set(selected_repos + manual_list))
 
     # 3. Import Logic
     c_d1, c_d2 = st.columns(2)
@@ -233,62 +344,111 @@ with tab5:
     with c_d2:
         end_date = st.date_input("End Date", datetime.today())
 
+    scan_all_branches = st.checkbox("🕵️‍♀️ Scan ALL branches (Slow)", help="Check this to find commits on unmerged feature branches.")
+
     if st.button("🚀 Fetch & Generate Logs"):
         if not selected_repos:
-            st.error("Please enter at least one repository.")
+            st.error("Please select at least one repository.")
         else:
-            all_commits = []
-            scan_progress = st.progress(0, text="Fetching from GitHub...")
-            
             headers = {"Accept": "application/vnd.github.v3+json"}
             if gh_token:
                 headers["Authorization"] = f"token {gh_token}"
             
-            for i, repo in enumerate(selected_repos):
-                try:
-                    # Fetch commits
-                    url = f"https://api.github.com/repos/{repo}/commits"
-                    params = {
-                        "author": gh_username,
-                        "since": start_date.strftime('%Y-%m-%dT00:00:00Z'),
-                        "until": (end_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00Z'), # Include end date fully
-                        "per_page": 100
-                    }
-                    
-                    resp = requests.get(url, headers=headers, params=params)
-                    
-                    if resp.status_code == 200:
-                        commits = resp.json()
-                        st.toast(f"Fetched {len(commits)} commits from {repo}!")
-                        for c in commits:
-                            commit_date_str = c["commit"]["author"]["date"]
-                            # Convert ISO to YYYY-MM-DD
-                            dt_obj = datetime.strptime(commit_date_str, "%Y-%m-%dT%H:%M:%SZ")
-                            date_only = dt_obj.strftime("%Y-%m-%d")
-                            msg = c["commit"]["message"]
-                            
-                            all_commits.append({
-                                "date": date_only,
-                                "message": msg,
-                                "repo": repo
-                            })
-                    else:
-                        st.error(f"Failed to fetch {repo}: {resp.status_code} - {resp.text}")
-                        
-                except Exception as e:
-                    st.error(f"Error fetching {repo}: {e}")
-                
-                scan_progress.progress((i + 1) / len(selected_repos))
+            # Use Gemini Logic...
+            if gemini_api_key:
+                genai.configure(api_key=gemini_api_key)
+                model = genai.GenerativeModel('gemini-pro')
+            else:
+                model = None
+
+            all_commits = []
+            seen_shas = set() # To store unique commit SHAs
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
             
-            if all_commits:
-                # Group by Date
-                commits_by_date = {}
-                for c in all_commits:
-                    d = c["date"]
-                    if d not in commits_by_date:
-                        commits_by_date[d] = []
-                    commits_by_date[d].append(c)
+            total_repos = len(selected_repos)
+            
+            for i, repo in enumerate(selected_repos):
+                # Determine branches to scan
+                branches = []
+                if scan_all_branches:
+                    status_text.text(f"Listing branches for {repo}...")
+                    try:
+                        br_url = f"https://api.github.com/repos/{repo}/branches"
+                        br_resp = requests.get(br_url, headers=headers)
+                        if br_resp.status_code == 200:
+                            branches = [b["name"] for b in br_resp.json()]
+                        else:
+                            st.warning(f"Could not list branches for {repo}, defaulting to main.")
+                            branches = [None]
+                    except:
+                        branches = [None]
+                else:
+                    branches = [None] # None means default branch
+
+                for branch_name in branches:
+                    branch_label = branch_name if branch_name else "default"
+                    status_text.text(f"Fetching {repo} [{branch_label}]...")
+                    
+                    try:
+                        url = f"https://api.github.com/repos/{repo}/commits"
+                        params = {
+                            "since": start_date.strftime('%Y-%m-%dT00:00:00Z'),
+                            "until": (end_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00Z'),
+                            "per_page": 100
+                        }
+                        if gh_username:
+                            params["author"] = gh_username
+                        if branch_name:
+                            params["sha"] = branch_name
+                        
+                        resp = requests.get(url, headers=headers, params=params)
+                        
+                        if resp.status_code == 200:
+                            commits = resp.json()
+                            new_count = 0
+                            for c in commits:
+                                sha = c["sha"]
+                                if sha in seen_shas:
+                                    continue # Skip duplicate
+                                seen_shas.add(sha)
+                                new_count += 1
+                                
+                                commit_date_str = c["commit"]["author"]["date"]
+                                dt_obj = datetime.strptime(commit_date_str, "%Y-%m-%dT%H:%M:%SZ")
+                                date_only = dt_obj.strftime("%Y-%m-%d")
+                                msg = c["commit"]["message"]
+                                
+                                all_commits.append({
+                                    "date": date_only,
+                                    "message": msg,
+                                    "repo": repo
+                                })
+                            # st.toast(f"Found {new_count} new commits in {repo}/{branch_label}")
+                        elif resp.status_code == 409:
+                            pass # Empty repo
+                        else:
+                            st.warning(f"Failed {repo}/{branch_label}: {resp.status_code}")
+                            
+                    except Exception as e:
+                        st.error(f"Error fetching {repo}: {e}")
                 
+                progress_bar.progress((i + 1) / total_repos)
+
+            status_text.text("Processing logs...")
+            # Group by Date
+            commits_by_date = {}
+            for c in all_commits:
+                d = c["date"]
+                if d not in commits_by_date:
+                    commits_by_date[d] = []
+                commits_by_date[d].append(c)
+            
+            # Summarize
+            if not commits_by_date:
+                st.warning("No unique commits found matching your criteria.")
+            else:
                 generated_logs = []
                 total_days = len(commits_by_date)
                 
@@ -303,7 +463,7 @@ with tab5:
                     except Exception as e:
                         st.error(f"Gemini Config Error: {e}")
 
-                for idx, (d_str, commits) in enumerate(commits_by_date.items()):
+                for idx, (date_str, commits) in enumerate(sorted(commits_by_date.items(), reverse=True)):
                     repos_touched = list(set([c["repo"] for c in commits]))
                     msgs = [c["message"] for c in commits] # Use ALL messages for context
                     
@@ -345,7 +505,8 @@ with tab5:
                                 sol = data.get("solution", "")
                             else:
                                 description = text
-                        except:
+                        except Exception as e:
+                            st.warning(f"⚠️ Gemini Error on {date_str}: {e}")
                             description = f"Contributed to {repo_text}. Updates include: {msgs[0]}."
                     
                     if not description:
@@ -354,7 +515,7 @@ with tab5:
                             description += f" Also worked on {msgs[1]}."
 
                     generated_logs.append({
-                        "Date": d_str,
+                        "Date": date_str,
                         "Activity": "1.1 - Software Development",
                         "Description": description,
                         "Problems": prob,
@@ -365,9 +526,6 @@ with tab5:
                 generated_logs.sort(key=lambda x: x["Date"])
                 st.session_state.generated_git_logs = pd.DataFrame(generated_logs)
                 st.success(f"✅ Generated {len(generated_logs)} entries via GitHub API!")
-                
-            else:
-                st.warning("No commits found matching that criteria.")
 
     # 4. Preview & Save (Same as before)
     if "generated_git_logs" in st.session_state and not st.session_state.generated_git_logs.empty:
