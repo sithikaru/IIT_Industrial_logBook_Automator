@@ -75,54 +75,84 @@ The app will open automatically in your default web browser (usually at `http://
 ### 1. 🤖 Bulk Auto-Fill (Git) - *Recommended*
 ![Bulk Auto-Fill Tab](docs/images/screenshot_git_tab.png)
 
-This is the main feature. It looks at your code commits and writes your logs for you.
+This is the central hub of the application. It automates the log-writing process by analyzing your GitHub history.
 
-1.  **Select Date Range**: Choose the Start and End date you want to generate logs for.
-2.  **Fetch Repositories**: Click to load your GitHub repositories.
-3.  **Choose Repos**: Select the specific repositories you worked on during that period.
-    *   *Option: Check "Filter by author" to ensure only YOUR commits are used.*
-    *   *Option: Check "Scan ALL branches" if you work on feature branches (slower).*
-4.  **Data Source**:
-    *   **Fetch from GitHub**: Gets fresh data from the API and saves a backup.
-    *   **Use Cached Data**: Loads instantly from the previous fetch (useful if you are iterating on the prompt).
-5.  **Generate**: Click **fetch & Generate Logs**.
-    *   The AI will process your commits and generate a table.
-    *   It will automatically detect the **Project Name** from your repo name.
-    *   It will write a natural summary (e.g., *"I implemented the login for [Project]..."*).
-6.  **Review & Save**: Edit any entries in the preview table if needed, then click **Save to Record Book**.
+#### 🎛️ Interface Controls
+| Control | Description |
+| :--- | :--- |
+| **Start / End Date** | Defines the range of time you want to generate logs for. Only commits within these dates are fetched. |
+| **Fetch Your Repositories** | Connects to GitHub using your Token to list all available repositories (private & public). |
+| **Choose Repositories** | A dropdown to select which projects you worked on. You can select multiple. |
+| **Scan ALL branches** | **Unchecked (Default)**: Scans only the default branch (usually `main` or `master`).<br>**Checked**: Scans every single branch. Use this if you work on feature branches that haven't been merged yet. *Note: Considerably slower.* |
+| **Filter by author** | **Checked**: Ignores commits made by other people. Uses `GITHUB_USERNAME` from your `.env`.<br>**Unchecked**: Includes commits from everyone. useful for pair programming. |
+| **Data Source** | **Fetch from GitHub**: Pulls fresh data from the API. Updates `fetched_commits.csv`.<br>**Use Cached Data**: Loads data from the local CSV file. Perfect for re-running the AI prompt without waiting for GitHub. |
+| **Fetch & Generate Logs** | The "Magic Button". It fetches the commits (or loads cache), batches them by day, sends them to Groq AI for summarization, and renders the specific "Project Name" into the logs. |
+
+#### 🔄 Workflow: Generating Logs from Scratch
+1.  Set your **Start Date** and **End Date**.
+2.  Click **Fetch Your Repositories**.
+3.  Select the relevant repos from the dropdown.
+4.  Ensure **Fetch from GitHub** is selected.
+5.  Click **Fetch & Generate Logs**.
+6.  Wait for the AI to process (you'll see a progress bar).
+7.  Review the generated table. You can edit the "Description" or "Problems" cells directly in the UI if needed.
+8.  Click **Save to Record Book** to commit them to your history.
+
+---
 
 ### 2. 📝 Daily Log
 ![Daily Log Tab](docs/images/screenshot_daily_tab.png)
 
-Use this for days where you didn't push code or need to add a manual entry.
--   Select the Date and Activity Code.
--   Write a description.
--   (Optional) Add Problems Encountered and Solutions.
--   Click **Add Entry**.
+Use this tab for days where you didn't write code (e.g., meetings, research, design) or if you prefer manual control.
+
+#### 🎛️ Interface Controls
+| Control | Description |
+| :--- | :--- |
+| **Date** | The specific day for this log entry. |
+| **Activity Code** | Dropdown matching standard placement activity codes (e.g., 1.1 Briefing, 4.2 Coding). |
+| **Description** | The main content of your log. Be professional and concise. |
+| **Problems / Solutions** | Optional fields to record specific technical challenges and how you solved them. |
+| **Add Entry** | Saves this single entry to your local database (`my_placement_logs.csv`). |
+
+---
 
 ### 3. 🗓️ Manual Weekly Fill
 ![Manual Weekly Fill Tab](docs/images/screenshot_weekly_tab.png)
 
-Useful for backfilling older weeks quickly without Git data.
--   Select the Month and Year.
--   Fill in details for Monday-Sunday.
--   Click **Save Week**.
+Designed for rapid backfilling of older logs where you might not have git data.
+
+#### 🎛️ Interface Controls
+| Control | Description |
+| :--- | :--- |
+| **Select Month/Year** | Sets the context for the table below. |
+| **Weekly Grid** | A spreadsheet-like view where you can type directly into cells for each day of the week (Mon-Sun). |
+| **Save Week** | Writes all 7 days' worth of data to your history file at once. |
+
+---
 
 ### 4. ⚙️ Excel Automator
 ![Excel Automator Tab](docs/images/screenshot_excel_tab.png)
 
-This generates the final file you submit to university.
-1.  **Upload Template**: Upload your university's `.xlsx` template file.
-    *   *The app expects a "WEEK ENDING" pattern in the template to locate where to write.*
-2.  **Select Date Range**: Choose the months you want to export.
-3.  **Download**: Click **Generate Excel** to get your filled file.
+The final step. This takes your saved logs and formats them into the official Excel file for submission.
+
+#### 🎛️ Interface Controls
+| Control | Description |
+| :--- | :--- |
+| **Upload Template** | Drag and drop your empty university log book template (`.xlsx`). The app looks for a "WEEK ENDING" marker to know where to start filling. |
+| **Start / End Date** | Defines which months to generate sheets for. The app creates a new tab for each month. |
+| **Generate Excel** | Reads your `my_placement_logs.csv`, merges it with the Template, and performs the filling logic. |
+| **Download Button** | Appears after generation. Click to save the final `Updated_Record_Book.xlsx`. |
+
+---
 
 ### 5. 📜 History
 ![History Tab](docs/images/screenshot_history_tab.png)
 
--   View all your saved logs in a master table.
--   Sort by date to see your progress.
--   **Clear All Data**: Use the danger button to reset `my_placement_logs.csv` (Warning: This cannot be undone).
+Your database view.
+
+#### 🔄 Features
+-   **Sortable Columns**: Click "Date" to sort logs chronologically.
+-   **Clear All Data (Reset)**: ⚠️ **Danger Zone**. This deletes `my_placement_logs.csv` and wipes your database. Use this only if you want to start completely fresh.
 
 ---
 
