@@ -73,6 +73,8 @@ The app will open automatically in your default web browser (usually at `http://
 ## 📖 User Guide
 
 ### 1. 🤖 Bulk Auto-Fill (Git) - *Recommended*
+![Bulk Auto-Fill Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_git_tab_1768393388897.png)
+
 This is the main feature. It looks at your code commits and writes your logs for you.
 
 1.  **Select Date Range**: Choose the Start and End date you want to generate logs for.
@@ -90,6 +92,8 @@ This is the main feature. It looks at your code commits and writes your logs for
 6.  **Review & Save**: Edit any entries in the preview table if needed, then click **Save to Record Book**.
 
 ### 2. 📝 Daily Log
+![Daily Log Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_daily_tab_1768393422829.png)
+
 Use this for days where you didn't push code or need to add a manual entry.
 -   Select the Date and Activity Code.
 -   Write a description.
@@ -97,12 +101,16 @@ Use this for days where you didn't push code or need to add a manual entry.
 -   Click **Add Entry**.
 
 ### 3. 🗓️ Manual Weekly Fill
+![Manual Weekly Fill Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_weekly_tab_1768393452729.png)
+
 Useful for backfilling older weeks quickly without Git data.
 -   Select the Month and Year.
 -   Fill in details for Monday-Sunday.
 -   Click **Save Week**.
 
 ### 4. ⚙️ Excel Automator
+![Excel Automator Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_excel_tab_1768393475603.png)
+
 This generates the final file you submit to university.
 1.  **Upload Template**: Upload your university's `.xlsx` template file.
     *   *The app expects a "WEEK ENDING" pattern in the template to locate where to write.*
@@ -110,6 +118,8 @@ This generates the final file you submit to university.
 3.  **Download**: Click **Generate Excel** to get your filled file.
 
 ### 5. 📜 History
+![History Tab](/Users/zijja/.gemini/antigravity/brain/27d85793-e341-41c4-909e-4a3b809a6f9b/screenshot_history_tab_1768393490983.png)
+
 -   View all your saved logs in a master table.
 -   Sort by date to see your progress.
 -   **Clear All Data**: Use the danger button to reset `my_placement_logs.csv` (Warning: This cannot be undone).
