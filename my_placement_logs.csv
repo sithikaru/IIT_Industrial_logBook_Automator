@@ -25,3 +25,87 @@ Date,Day,Week_Ending,Activity_Code,Description,Problems,Solutions
 2026-01-14,WEDNESDAY,2026-01-18,1.1,Test description for browser agent,,
 2026-01-14,WEDNESDAY,2026-01-18,1.1,ff,,
 2026-01-14,WEDNESDAY,2026-01-18,1.1,Test description of work for daily log.,,
+2025-12-15 00:00:00,MONDAY,2025-12-21,1.1,Contributed to xamit_rest_api. Updates include: Merge branch 'paymetGatewayLogic' of https://github.com/Inforwaves/xamit_rest_api into paymetGatewayLogic.,,
+2025-12-18 00:00:00,THURSDAY,2025-12-21,1.1,"Contributed to xamit_rest_api, xamit-app-frontend. Updates include: feat: Add RevenueCat sandbox mode detection, enhance purchase error handling, and improve initialization robustness..",,
+2025-12-19 00:00:00,FRIDAY,2025-12-21,1.1,"Contributed to xamit-app-frontend. Updates include: feat: Add Android billing permission, implement RevenueCat login with user ID, and enhance the test store UI..",,
+2025-12-22 00:00:00,MONDAY,2025-12-28,1.1,Contributed to articom-base-mobile. Updates include: Professionalize docs and bump to 0.0.1-dev.4.,,
+2025-12-23 00:00:00,TUESDAY,2025-12-28,1.1,"Contributed to articom-base-mobile. Updates include: feat: Introduce `onPressed` for `VoiceAssistantButton` and `expandOnImageTap` for `MiniCard`, update package version, and remove unused dependencies..",,
+2025-12-29 00:00:00,MONDAY,2026-01-04,1.1,"Contributed to xamit_rest_api, xamit-app-frontend. Updates include: chore: add release signing configuration to debug build type.",,
+2025-12-30 00:00:00,TUESDAY,2026-01-04,1.1,Contributed to xamit_rest_api. Updates include: feat: rename project in package.json and remove 20 and 200 point payment packages from migration..,,
+2025-12-31 00:00:00,WEDNESDAY,2026-01-04,1.1,"Contributed to xamit-app-frontend. Updates include: chore: Bump app version, update default API base URL, and set RevenueCat log level to error..",,
+2026-01-02 00:00:00,FRIDAY,2026-01-04,1.1,"Contributed to viral-networks-be, xamit-app-frontend. Updates include: fix: Handle unassigned paper grades with `gradeId = 0` in filtering and safely manage null grade/medium/subject relations in paper details..",,
+2026-01-05 00:00:00,MONDAY,2026-01-11,1.1,Contributed to xamit-app-frontend. Updates include: deps: remove unused iOS plugins and update RevenueCat SDK dependencies..,,
+2026-01-06 00:00:00,TUESDAY,2026-01-11,1.1,Contributed to xamit-app-frontend. Updates include: feat: centralize error message handling with a new utility and enhance the credits view's error display..,,
+2026-01-09 00:00:00,FRIDAY,2026-01-11,1.1,"Contributed to xamit-app-frontend. Updates include: fix(android): resolve 'Ash Screen' and 'Stuck Spinner' in Credits page
+
+- Implemented ValueNotifier for 'Purchase Points' dropdown to ensure reactive UI updates (fixes stuck spinner).
+- Added robust null checks for transaction lists to prevent background page crashes.
+- Hardened RegExp matching and list lookups with safe fallbacks to handle malformed product data.
+- Removed unused imports.
+- Verified against build 1.2.12+45..",,
+2026-01-12 00:00:00,MONDAY,2026-01-18,1.1,"Contributed to xamit-app-frontend. Updates include: feat: implement limited credit trial flow
+- Remove credits navigation tab and credits page from layout
+- Restore ""Required Credits"" display and validation in PaperDetailPage
+- Fix async purchase flow to consume credits before quiz start
+- Add ""Credits will be reset in every Monday"" message for insufficient credits
+- Restore credit balance display in HomeBannerWidget
+- Cleanup unused code in CreditsAndroidPage.",,
+2026-01-13 00:00:00,TUESDAY,2026-01-18,1.1,Contributed to xamit-app-frontend. Updates include:  bump version.,,
+2025-12-15 00:00:00,MONDAY,2025-12-21,1.1,Contributed to xamit_rest_api. Updates include: Merge branch 'paymetGatewayLogic' of https://github.com/Inforwaves/xamit_rest_api into paymetGatewayLogic.,,
+2025-12-16 00:00:00,TUESDAY,2025-12-21,1.1,Contributed to employee-tracking-app-mobile. Updates include: chore: update gitignore to exclude macOS metadata files.,,
+2025-12-18 00:00:00,THURSDAY,2025-12-21,1.1,"Contributed to employee-tracking-app-mobile, xamit_rest_api, xamit-app-frontend. Updates include: feat(ios): Migrate from CocoaPods to Swift Package Manager
+
+Major Changes:
+- Remove CocoaPods dependency management (Podfile, Podfile.lock)
+- Integrate Swift Package Manager for iOS plugin dependencies
+- Add FlutterGeneratedPluginSwiftPackage to Xcode project
+- Configure 'Run Prepare Flutter Framework Script' pre-action in build scheme
+
+iOS Changes:
+- Updated project.pbxproj with SPM package references
+- Modified Runner.xcscheme to include SPM pre-action script
+- Updated Flutter configuration files (Debug.xcconfig, Release.xcconfig)
+- Regenerated app icons with Flutter standard naming (Icon-App-*)
+- Updated workspace configuration for SPM compatibility
+
+Android Changes:
+- Migrated build scripts to Kotlin DSL (.gradle.kts)
+- Updated MainActivity to Kotlin package structure
+- Modernized Android build configuration
+
+Dependencies:
+- Updated pubspec.lock with latest package versions
+- All Flutter plugins now resolved via SPM for iOS
+
+This migration enables:
+- Native Swift Package Manager support for iOS dependencies
+- Faster dependency resolution and builds
+- Better Xcode integration
+- Elimination of CocoaPods overhead
+
+Refs: Flutter SPM documentation
+https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-app-developers.",,
+2025-12-19 00:00:00,FRIDAY,2025-12-21,1.1,"Contributed to employee-tracking-app-mobile, xamit-app-frontend. Updates include: feat: Initialize iOS dependency management with CocoaPods and Swift Package Manager for Firebase and update build configurations..",,
+2025-12-22 00:00:00,MONDAY,2025-12-28,1.1,Contributed to articom-base-mobile. Updates include: Professionalize docs and bump to 0.0.1-dev.4.,,
+2025-12-23 00:00:00,TUESDAY,2025-12-28,1.1,"Contributed to articom-base-mobile. Updates include: feat: Introduce `onPressed` for `VoiceAssistantButton` and `expandOnImageTap` for `MiniCard`, update package version, and remove unused dependencies..",,
+2025-12-29 00:00:00,MONDAY,2026-01-04,1.1,"Contributed to xamit_rest_api, xamit-app-frontend. Updates include: chore: add release signing configuration to debug build type.",,
+2025-12-30 00:00:00,TUESDAY,2026-01-04,1.1,Contributed to xamit_rest_api. Updates include: feat: rename project in package.json and remove 20 and 200 point payment packages from migration..,,
+2025-12-31 00:00:00,WEDNESDAY,2026-01-04,1.1,"Contributed to xamit-app-frontend. Updates include: chore: Bump app version, update default API base URL, and set RevenueCat log level to error..",,
+2026-01-02 00:00:00,FRIDAY,2026-01-04,1.1,"Contributed to viral-networks-be, xamit-app-frontend. Updates include: fix: Handle unassigned paper grades with `gradeId = 0` in filtering and safely manage null grade/medium/subject relations in paper details..",,
+2026-01-05 00:00:00,MONDAY,2026-01-11,1.1,Contributed to xamit-app-frontend. Updates include: deps: remove unused iOS plugins and update RevenueCat SDK dependencies..,,
+2026-01-06 00:00:00,TUESDAY,2026-01-11,1.1,Contributed to xamit-app-frontend. Updates include: feat: centralize error message handling with a new utility and enhance the credits view's error display..,,
+2026-01-09 00:00:00,FRIDAY,2026-01-11,1.1,"Contributed to xamit-app-frontend. Updates include: fix(android): resolve 'Ash Screen' and 'Stuck Spinner' in Credits page
+
+- Implemented ValueNotifier for 'Purchase Points' dropdown to ensure reactive UI updates (fixes stuck spinner).
+- Added robust null checks for transaction lists to prevent background page crashes.
+- Hardened RegExp matching and list lookups with safe fallbacks to handle malformed product data.
+- Removed unused imports.
+- Verified against build 1.2.12+45..",,
+2026-01-12 00:00:00,MONDAY,2026-01-18,1.1,"Contributed to xamit-app-frontend. Updates include: feat: implement limited credit trial flow
+- Remove credits navigation tab and credits page from layout
+- Restore ""Required Credits"" display and validation in PaperDetailPage
+- Fix async purchase flow to consume credits before quiz start
+- Add ""Credits will be reset in every Monday"" message for insufficient credits
+- Restore credit balance display in HomeBannerWidget
+- Cleanup unused code in CreditsAndroidPage.",,
+2026-01-13 00:00:00,TUESDAY,2026-01-18,1.1,Contributed to xamit-app-frontend. Updates include:  bump version.,,

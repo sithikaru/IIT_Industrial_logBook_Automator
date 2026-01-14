@@ -214,61 +214,15 @@ with tab5:
     st.header("☁️ GitHub History Importer")
     st.info("Fetch commit history directly from GitHub.com to generate logs. No local .git folder needed!")
 
-    # 1. Config
-    with st.expander("⚙️ Configuration", expanded=True):
-        col_g1, col_g2 = st.columns(2)
-        with col_g1:
-            gh_username = st.text_input("GitHub Username (Optional - Leave empty for ALL authors)", value="")
-            gh_branch = st.text_input("Branch (Optional - Default is main/master)", value="")
-            # Load from env, allow override
-            env_gh_token = os.getenv("GITHUB_TOKEN", "")
-            gh_token = st.text_input("GitHub Token (Required for Private Repos)", value=env_gh_token, type="password", help="Loaded from .env if available")
-        with col_g2:
-            # Load from env, allow override
-            env_gemini_key = os.getenv("GEMINI_API_KEY", "")
-            gemini_api_key = st.text_input("Gemini API Key (Optional)", value=env_gemini_key, type="password", help="Loaded from .env if available")
+    # Load Config from Env
+    gh_username = os.getenv("GITHUB_USERNAME", "")
+    gh_token = os.getenv("GITHUB_TOKEN", "")
+    gemini_api_key = os.getenv("GEMINI_API_KEY", "")
 
-    # 1.1 Debug Token
-    with st.expander("🛠️ Debug Token Access"):
-        if st.button("Test Token Permissions"):
-            if not gh_token:
-                st.error("No token provided.")
-            else:
-                try:
-                    # 1. Check Identity
-                    headers = {"Authorization": f"token {gh_token}"}
-                    user_resp = requests.get("https://api.github.com/user", headers=headers)
-                    if user_resp.status_code == 200:
-                        st.success(f"Authenticated as: **{user_resp.json()['login']}**")
-                    else:
-                        st.error(f"Authentication failed: {user_resp.status_code}")
-                    
-                    # 2. Check Orgs
-                    orgs_resp = requests.get("https://api.github.com/user/orgs", headers=headers)
-                    if orgs_resp.status_code == 200:
-                        orgs = [o['login'] for o in orgs_resp.json()]
-                        st.write(f"Visible Organizations: `{', '.join(orgs)}`")
-                        if "Inforwaves" not in orgs:
-                             st.warning("⚠️ 'Inforwaves' is missing.")
-                             
-                             # 3. Deep Probe
-                             st.info("🔬 Running deep probe on 'Inforwaves/viral-networks-fe'...")
-                             probe = requests.get("https://api.github.com/repos/Inforwaves/viral-networks-fe", headers=headers)
-                             if probe.status_code == 200:
-                                 st.success("✅ **SUCCESS!** The token CAN access 'Inforwaves/viral-networks-fe' directly! You can use the Manual Entry box below.")
-                             elif probe.status_code == 404:
-                                 st.error("❌ Repo not found (404). Token cannot see it.")
-                             elif probe.status_code == 403:
-                                 st.error("❌ Access Forbidden (403).")
-                                 sso_header = probe.headers.get('x-github-sso')
-                                 if sso_header:
-                                     st.error(f"🔐 **SSO REQUIRED:** GitHub says: `{sso_header}`. You MUST click 'Configure SSO' on your token.")
-                                 else:
-                                     st.error("Reason unknown. Check 'repo' scope.")
-                    else:
-                        st.error("Failed to fetch organizations.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+    if not gh_token:
+        st.warning("⚠️ `GITHUB_TOKEN` is missing in `.env` file.")
+    if not gh_username:
+        st.warning("⚠️ `GITHUB_USERNAME` is missing in `.env` file.")
 
     # 2. Repo Selection
     st.subheader("Select Repositories")
@@ -344,7 +298,11 @@ with tab5:
     with c_d2:
         end_date = st.date_input("End Date", datetime.today())
 
-    scan_all_branches = st.checkbox("🕵️‍♀️ Scan ALL branches (Slow)", help="Check this to find commits on unmerged feature branches.")
+    scan_all_branches = st.checkbox("🕵️‍♀️ Scan ALL branches (Slow)", value=False, help="Check this to find commits on unmerged feature branches.")
+    
+    use_author_filter = True
+    if gh_username:
+        use_author_filter = st.checkbox(f"Filter by author: {gh_username}", value=True, help="Uncheck to see commits from everyone.")
 
     if st.button("🚀 Fetch & Generate Logs"):
         if not selected_repos:
@@ -454,12 +412,41 @@ with tab5:
                 
                 gen_progress = st.progress(0, text="Summarizing with Gemini..." if gemini_api_key else "Summarizing...")
                 
-                # Configure Gemini
+                # Configure Gemini with Auto-Fallback
                 model = None
                 if gemini_api_key:
                     try:
                         genai.configure(api_key=gemini_api_key)
-                        model = genai.GenerativeModel('gemini-pro')
+                        
+                        # 1. Try preferred model
+                        preferred_model = 'gemini-1.5-flash'
+                        try:
+                            # Test access by finding it in list (avoids token cost of generation check)
+                            supported_models = []
+                            for m in genai.list_models():
+                                if 'generateContent' in m.supported_generation_methods:
+                                    supported_models.append(m.name)
+                            
+                            # Check if preference exists in the list (fuzzy match)
+                            target_model = next((m for m in supported_models if preferred_model in m), None)
+                            
+                            if target_model:
+                                 # Use the exact name from the list (e.g. models/gemini-1.5-flash-001)
+                                 model = genai.GenerativeModel(target_model)
+                                 # st.toast(f"Logged in with {target_model}")
+                            elif supported_models:
+                                # Fallback to first available
+                                fallback = supported_models[0]
+                                st.warning(f"Preferred '{preferred_model}' not found. Falling back to '{fallback}'.")
+                                model = genai.GenerativeModel(fallback)
+                            else:
+                                st.error("No text generation models found for this API key.")
+                                model = None
+                                
+                        except Exception as inner_e:
+                            st.warning(f"Model list failed: {inner_e}. Trying defaults.")
+                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            
                     except Exception as e:
                         st.error(f"Gemini Config Error: {e}")
 
